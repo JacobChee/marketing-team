@@ -2,8 +2,21 @@ import { google } from 'googleapis'
 
 function getAuth() {
   const email = process.env.GOOGLE_CLIENT_EMAIL
-  const key   = process.env.GOOGLE_PRIVATE_KEY?.replace(/\\n/g, '\n')
+  let key = process.env.GOOGLE_PRIVATE_KEY
   if (!email || !key) throw new Error('NOT_CONFIGURED')
+
+  // Handle all the ways Vercel/Windows can mangle the key:
+  // 1. Literal \n strings → real newlines
+  key = key.replace(/\\n/g, '\n')
+  // 2. Strip surrounding quotes if accidentally included
+  key = key.replace(/^"|"$/g, '').trim()
+  // 3. If still no newlines inside the key body, reformat manually
+  if (!key.includes('\n')) {
+    key = key
+      .replace('-----BEGIN PRIVATE KEY-----', '-----BEGIN PRIVATE KEY-----\n')
+      .replace('-----END PRIVATE KEY-----', '\n-----END PRIVATE KEY-----')
+  }
+
   return new google.auth.JWT({
     email,
     key,
