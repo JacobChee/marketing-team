@@ -5,22 +5,26 @@ import Link from 'next/link'
 import { employees, employeeList } from '../../lib/employees'
 import '../globals.css'
 
-const STATUS_COLS = [
-  { key: 'pending', label: 'Pending Approval', color: '#C9A026' },
+const COLS = [
+  { key: 'pending',  label: 'Pending',  color: '#C9A026' },
   { key: 'approved', label: 'Approved', color: '#4A90D9' },
-  { key: 'done', label: 'Done', color: '#5CB85C' },
+  { key: 'done',     label: 'Done',     color: '#5CB85C' },
 ]
 
-const PRIORITY_COLOR = { high: '#E84393', medium: '#C9A026', low: '#5A7A99' }
+const PRIORITY_DOT = { high: '#E84393', medium: '#C9A026', low: '#3A5A7A' }
+const TYPE_LABEL = { daily: 'Daily', weekly: 'Weekly', systems: 'Setup', handoff: 'Handoff' }
 const BRAND_LABEL = { afix: 'afix.sg', atsell: 'atsell.io', both: 'Both' }
 
 export default function TaskBoard() {
-  const [tasks, setTasks] = useState([])
-  const [loading, setLoading] = useState(true)
+  const [tasks, setTasks]           = useState([])
+  const [loading, setLoading]       = useState(true)
   const [generating, setGenerating] = useState({})
-  const [filter, setFilter] = useState('all')
+  const [filter, setFilter]         = useState('all')
   const [runningTask, setRunningTask] = useState(null)
   const [taskOutputs, setTaskOutputs] = useState({})
+  const [showGenerate, setShowGenerate] = useState(false)
+  const [confirmReset, setConfirmReset] = useState(false)
+  const [resetting, setResetting]   = useState(false)
 
   const fetchTasks = useCallback(async () => {
     const res = await fetch('/api/tasks')
@@ -45,6 +49,22 @@ export default function TaskBoard() {
     }
   }
 
+  async function generateAll(type) {
+    setGenerating(g => ({ ...g, [`all-${type}`]: true }))
+    try {
+      await Promise.all(employeeList.map(emp =>
+        fetch('/api/tasks/generate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ employeeId: emp.id, type }),
+        })
+      ))
+      await fetchTasks()
+    } finally {
+      setGenerating(g => ({ ...g, [`all-${type}`]: false }))
+    }
+  }
+
   async function updateTask(id, updates) {
     await fetch(`/api/tasks/${id}`, {
       method: 'PATCH',
@@ -59,12 +79,20 @@ export default function TaskBoard() {
     setTasks(prev => prev.filter(t => t.id !== id))
   }
 
+  async function resetBoard() {
+    setResetting(true)
+    await fetch('/api/tasks/reset', { method: 'POST' })
+    setTasks([])
+    setResetting(false)
+    setConfirmReset(false)
+  }
+
   async function runTask(task) {
     setRunningTask(task.id)
     setTaskOutputs(o => ({ ...o, [task.id]: '' }))
     const emp = employees[task.employee]
-
-    const prompt = `Execute this task and produce the actual output:\n\n**Task:** ${task.title}\n**Brief:** ${task.description}\n**Brand:** ${BRAND_LABEL[task.brand]}\n\nProduce the complete deliverable now. No preamble.`
+    const context = task.handoffContext ? `\n\nContext from handoff:\n${task.handoffContext}` : ''
+    const prompt = `Execute this task and produce the actual output:\n\n**Task:** ${task.title}\n**Brief:** ${task.description}\n**Brand:** ${BRAND_LABEL[task.brand]}${context}\n\nProduce the complete deliverable now. No preamble.`
 
     try {
       const res = await fetch('/api/chat', {
@@ -73,6 +101,7 @@ export default function TaskBoard() {
         body: JSON.stringify({
           messages: [{ role: 'user', content: prompt }],
           systemPrompt: emp.systemPrompt,
+          employeeId: emp.id,
         }),
       })
       const reader = res.body.getReader()
@@ -81,14 +110,10 @@ export default function TaskBoard() {
       while (true) {
         const { done, value } = await reader.read()
         if (done) break
-        const lines = decoder.decode(value).split('\n').filter(l => l.startsWith('data: '))
-        for (const line of lines) {
+        for (const line of decoder.decode(value).split('\n').filter(l => l.startsWith('data: '))) {
           try {
             const d = JSON.parse(line.slice(6))
-            if (d.text) {
-              full += d.text
-              setTaskOutputs(o => ({ ...o, [task.id]: full }))
-            }
+            if (d.text) { full += d.text; setTaskOutputs(o => ({ ...o, [task.id]: full })) }
           } catch {}
         }
       }
@@ -98,102 +123,169 @@ export default function TaskBoard() {
     }
   }
 
-  const filtered = filter === 'all' ? tasks : tasks.filter(t => t.employee === filter)
-  const rejected = filtered.filter(t => t.status === 'rejected')
+  const filtered  = filter === 'all' ? tasks : tasks.filter(t => t.employee === filter)
+  const rejected  = filtered.filter(t => t.status === 'rejected')
+  const pending   = tasks.filter(t => t.status === 'pending').length
+  const anyGenerating = Object.values(generating).some(Boolean)
 
   return (
     <div className="min-h-screen" style={{ background: '#0B1829' }}>
+
       {/* Header */}
       <div className="border-b" style={{ borderColor: '#1A3350' }}>
-        <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
-          <div className="flex items-center gap-4">
-            <Link href="/" className="text-sm hover:opacity-70 transition-opacity" style={{ color: '#5A7A99' }}>← Dashboard</Link>
-            <h1 className="text-lg font-semibold" style={{ fontFamily: 'Playfair Display, serif', color: '#C9A026' }}>Task Board</h1>
-          </div>
-          <div className="flex items-center gap-2 text-xs" style={{ color: '#5A7A99' }}>
-            <span className="w-2 h-2 rounded-full inline-block" style={{ background: '#C9A026' }} />
-            {tasks.filter(t => t.status === 'pending').length} pending approval
+        <div className="max-w-7xl mx-auto px-6 py-4 flex items-center gap-4">
+          <Link href="/" className="text-sm hover:opacity-70 transition-opacity" style={{ color: '#5A7A99' }}>← Dashboard</Link>
+          <h1 className="font-semibold" style={{ fontFamily: 'Playfair Display, serif', color: '#C9A026' }}>Task Board</h1>
+
+          {/* Pending badge */}
+          {pending > 0 && (
+            <span className="text-xs px-2.5 py-1 rounded-full font-semibold" style={{ background: '#C9A02622', color: '#C9A026', border: '1px solid #C9A02644' }}>
+              {pending} pending
+            </span>
+          )}
+
+          <div className="ml-auto flex items-center gap-2">
+            {/* Generate toggle */}
+            <button
+              onClick={() => setShowGenerate(v => !v)}
+              className="text-xs px-3 py-1.5 rounded-lg font-medium transition-colors"
+              style={{ background: showGenerate ? '#C9A026' : '#112236', color: showGenerate ? '#0B1829' : '#8899AA', border: '1px solid #1A3350' }}
+            >
+              {anyGenerating ? '⟳ Generating...' : '+ Generate'}
+            </button>
+
+            {/* Reset */}
+            {!confirmReset ? (
+              <button
+                onClick={() => setConfirmReset(true)}
+                className="text-xs px-3 py-1.5 rounded-lg transition-opacity hover:opacity-70"
+                style={{ background: '#112236', color: '#5A7A99', border: '1px solid #1A3350' }}
+              >
+                Clear board
+              </button>
+            ) : (
+              <div className="flex items-center gap-1.5">
+                <span className="text-xs" style={{ color: '#E84393' }}>Sure?</span>
+                <button onClick={resetBoard} disabled={resetting} className="text-xs px-2.5 py-1 rounded font-medium" style={{ background: '#E8439322', color: '#E84393', border: '1px solid #E8439344' }}>
+                  {resetting ? '...' : 'Yes, clear'}
+                </button>
+                <button onClick={() => setConfirmReset(false)} className="text-xs px-2 py-1 rounded" style={{ background: '#112236', color: '#5A7A99' }}>
+                  Cancel
+                </button>
+              </div>
+            )}
           </div>
         </div>
       </div>
 
-      <div className="max-w-7xl mx-auto px-6 py-6">
-        {/* Generate + Filter bar */}
-        <div className="flex items-center gap-3 mb-6 flex-wrap">
-          <span className="text-xs font-semibold uppercase tracking-wider" style={{ color: '#5A7A99' }}>Filter:</span>
-          <button
-            onClick={() => setFilter('all')}
-            className="text-xs px-3 py-1.5 rounded-full transition-colors"
-            style={{ background: filter === 'all' ? '#C9A026' : '#112236', color: filter === 'all' ? '#0B1829' : '#8899AA', border: '1px solid #1A3350' }}
-          >
-            All
-          </button>
-          {employeeList.map(emp => (
+      {/* Generate panel */}
+      {showGenerate && (
+        <div className="border-b" style={{ borderColor: '#1A3350', background: '#0D1F35' }}>
+          <div className="max-w-7xl mx-auto px-6 py-5">
+            {/* Generate all */}
+            <div className="flex items-center gap-3 mb-4">
+              <span className="text-xs font-semibold uppercase tracking-wider" style={{ color: '#5A7A99' }}>Generate for all</span>
+              {['daily', 'weekly', 'systems'].map(type => (
+                <button
+                  key={type}
+                  onClick={() => generateAll(type)}
+                  disabled={generating[`all-${type}`]}
+                  className="text-xs px-3 py-1.5 rounded-lg font-medium disabled:opacity-50 transition-opacity"
+                  style={{ background: '#112236', color: '#C9A026', border: '1px solid #C9A02644' }}
+                >
+                  {generating[`all-${type}`] ? '...' : `+ All ${type}`}
+                </button>
+              ))}
+            </div>
+
+            {/* Per-employee */}
+            <div className="grid grid-cols-3 md:grid-cols-6 gap-2">
+              {employeeList.map(emp => (
+                <div key={emp.id} className="rounded-lg p-3" style={{ background: '#112236', border: `1px solid ${emp.accent}22` }}>
+                  <div className="flex items-center gap-1.5 mb-2">
+                    <span>{emp.emoji}</span>
+                    <span className="text-xs font-semibold" style={{ color: emp.accent }}>{emp.name}</span>
+                  </div>
+                  <div className="flex flex-col gap-1">
+                    {['daily', 'weekly', 'systems'].map(type => (
+                      <button
+                        key={type}
+                        onClick={() => generateTasks(emp.id, type)}
+                        disabled={generating[`${emp.id}-${type}`]}
+                        className="text-xs py-1 rounded disabled:opacity-50 transition-opacity capitalize"
+                        style={{
+                          background: '#0B1829',
+                          color: type === 'systems' ? emp.accent : '#5A7A99',
+                          border: `1px solid ${type === 'systems' ? emp.accent + '33' : '#1A3350'}`,
+                        }}
+                      >
+                        {generating[`${emp.id}-${type}`] ? '...' : type === 'systems' ? '⚙ Setup' : `+ ${type}`}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div className="max-w-7xl mx-auto px-6 py-5">
+
+        {/* Filter pills */}
+        <div className="flex items-center gap-2 mb-6 flex-wrap">
+          {[{ id: 'all', emoji: '◈', name: 'All', accent: '#C9A026' }, ...employeeList].map(e => (
             <button
-              key={emp.id}
-              onClick={() => setFilter(emp.id)}
-              className="text-xs px-3 py-1.5 rounded-full transition-colors"
-              style={{ background: filter === emp.id ? emp.accent : '#112236', color: filter === emp.id ? '#0B1829' : '#8899AA', border: '1px solid #1A3350' }}
+              key={e.id}
+              onClick={() => setFilter(e.id)}
+              className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-full transition-all"
+              style={{
+                background: filter === e.id ? e.accent : '#112236',
+                color: filter === e.id ? '#0B1829' : '#5A7A99',
+                border: `1px solid ${filter === e.id ? e.accent : '#1A3350'}`,
+                fontWeight: filter === e.id ? 600 : 400,
+              }}
             >
-              {emp.emoji} {emp.name}
+              {e.emoji} {e.name}
+              {e.id !== 'all' && tasks.filter(t => t.employee === e.id && t.status === 'pending').length > 0 && (
+                <span className="w-4 h-4 rounded-full text-xs flex items-center justify-center font-bold"
+                  style={{ background: filter === e.id ? '#0B182966' : e.accent + '33', color: filter === e.id ? '#0B1829' : e.accent }}>
+                  {tasks.filter(t => t.employee === e.id && t.status === 'pending').length}
+                </span>
+              )}
             </button>
           ))}
         </div>
 
-        {/* Generate buttons */}
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 mb-8">
-          {employeeList.map(emp => (
-            <div key={emp.id} className="rounded-lg p-3" style={{ background: '#112236', border: '1px solid #1A3350' }}>
-              <div className="text-xs font-semibold mb-2" style={{ color: emp.accent }}>{emp.emoji} {emp.name}</div>
-              <div className="flex flex-col gap-1.5">
-                <button
-                  onClick={() => generateTasks(emp.id, 'daily')}
-                  disabled={generating[`${emp.id}-daily`]}
-                  className="text-xs py-1 px-2 rounded transition-opacity disabled:opacity-50"
-                  style={{ background: '#0B1829', color: '#8899AA', border: '1px solid #1A3350' }}
-                >
-                  {generating[`${emp.id}-daily`] ? '...' : '+ Daily'}
-                </button>
-                <button
-                  onClick={() => generateTasks(emp.id, 'weekly')}
-                  disabled={generating[`${emp.id}-weekly`]}
-                  className="text-xs py-1 px-2 rounded transition-opacity disabled:opacity-50"
-                  style={{ background: '#0B1829', color: '#8899AA', border: '1px solid #1A3350' }}
-                >
-                  {generating[`${emp.id}-weekly`] ? '...' : '+ Weekly'}
-                </button>
-                <button
-                  onClick={() => generateTasks(emp.id, 'systems')}
-                  disabled={generating[`${emp.id}-systems`]}
-                  className="text-xs py-1 px-2 rounded transition-opacity disabled:opacity-50"
-                  style={{ background: '#0B1829', color: emp.accent, border: `1px solid ${emp.accent}44` }}
-                >
-                  {generating[`${emp.id}-systems`] ? '...' : '⚙ Setup'}
-                </button>
-              </div>
-            </div>
-          ))}
-        </div>
-
         {loading ? (
-          <div className="text-center py-20 text-sm" style={{ color: '#5A7A99' }}>Loading tasks...</div>
+          <div className="flex items-center justify-center py-24">
+            <div className="flex gap-1.5">
+              {[0,1,2].map(i => (
+                <span key={i} className="w-2 h-2 rounded-full animate-bounce" style={{ background: '#C9A026', animationDelay: `${i*150}ms` }} />
+              ))}
+            </div>
+          </div>
         ) : (
           <>
-            {/* Kanban columns */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-              {STATUS_COLS.map(col => {
+            {/* Kanban */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+              {COLS.map(col => {
                 const colTasks = filtered.filter(t => t.status === col.key)
                 return (
                   <div key={col.key}>
-                    <div className="flex items-center gap-2 mb-3">
-                      <span className="w-2 h-2 rounded-full" style={{ background: col.color }} />
-                      <span className="text-xs font-semibold uppercase tracking-wider" style={{ color: col.color }}>{col.label}</span>
-                      <span className="text-xs ml-auto px-1.5 py-0.5 rounded" style={{ background: '#112236', color: '#5A7A99' }}>{colTasks.length}</span>
+                    {/* Column header */}
+                    <div className="flex items-center gap-2.5 mb-3 pb-3" style={{ borderBottom: `2px solid ${col.color}22` }}>
+                      <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: col.color }} />
+                      <span className="text-sm font-semibold" style={{ color: col.color }}>{col.label}</span>
+                      <span className="ml-auto text-xs font-semibold px-2 py-0.5 rounded-full" style={{ background: `${col.color}18`, color: col.color }}>
+                        {colTasks.length}
+                      </span>
                     </div>
+
                     <div className="space-y-3">
                       {colTasks.length === 0 && (
-                        <div className="text-xs text-center py-6 rounded-lg" style={{ color: '#2A4560', border: '1px dashed #1A3350' }}>
-                          No tasks
+                        <div className="rounded-xl py-10 text-center text-xs" style={{ color: '#1A3350', border: '1px dashed #1A3350' }}>
+                          Empty
                         </div>
                       )}
                       {colTasks.map(task => (
@@ -217,11 +309,11 @@ export default function TaskBoard() {
               })}
             </div>
 
-            {/* Rejected tasks (collapsed) */}
+            {/* Rejected (collapsed) */}
             {rejected.length > 0 && (
               <details className="mt-8">
-                <summary className="text-xs cursor-pointer" style={{ color: '#2A4560' }}>
-                  {rejected.length} rejected task{rejected.length > 1 ? 's' : ''} — click to show
+                <summary className="text-xs cursor-pointer select-none" style={{ color: '#2A4560' }}>
+                  {rejected.length} rejected — show
                 </summary>
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mt-3">
                   {rejected.map(task => (
@@ -232,6 +324,7 @@ export default function TaskBoard() {
                       onApprove={() => updateTask(task.id, { status: 'pending' })}
                       onDelete={() => deleteTask(task.id)}
                       isRunning={false}
+                      onRefresh={fetchTasks}
                     />
                   ))}
                 </div>
@@ -247,8 +340,10 @@ export default function TaskBoard() {
 function TaskCard({ task, colColor, onApprove, onReject, onDelete, onRun, onMarkDone, isRunning, output, onRefresh }) {
   const emp = employees[task.employee]
   const [showOutput, setShowOutput] = useState(false)
-  const [handoffTo, setHandoffTo] = useState('')
-  const [handing, setHanding] = useState(false)
+  const [handoffTo, setHandoffTo]   = useState('')
+  const [handing, setHanding]       = useState(false)
+
+  useEffect(() => { if (output) setShowOutput(true) }, [output])
 
   async function doHandoff() {
     if (!handoffTo) return
@@ -258,121 +353,120 @@ function TaskCard({ task, colColor, onApprove, onReject, onDelete, onRun, onMark
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ fromTask: { ...task, output: output || task.output }, toEmployeeId: handoffTo }),
     })
-    setHandoffTo('')
-    setHanding(false)
-    onRefresh?.()
+    setHandoffTo(''); setHanding(false); onRefresh?.()
   }
 
-  useEffect(() => {
-    if (output) setShowOutput(true)
-  }, [output])
+  const typeColor = { daily: '#3A5A7A', weekly: '#2A4A6A', systems: emp?.accent + '99', handoff: '#9B59B655' }
 
   return (
-    <div className="rounded-xl p-4" style={{ background: '#112236', border: `1px solid #1A3350` }}>
-      {/* Employee + brand */}
-      <div className="flex items-center justify-between mb-2">
-        <div className="flex items-center gap-1.5">
-          <span className="text-sm">{emp?.emoji}</span>
-          <span className="text-xs font-medium" style={{ color: emp?.accent }}>{emp?.name}</span>
+    <div
+      className="rounded-xl overflow-hidden"
+      style={{ background: '#112236', border: '1px solid #1A3350', borderLeft: `3px solid ${emp?.accent || colColor}` }}
+    >
+      <div className="p-4">
+        {/* Top row: employee + badges */}
+        <div className="flex items-center justify-between mb-2.5">
+          <div className="flex items-center gap-1.5">
+            <span className="text-base leading-none">{emp?.emoji}</span>
+            <span className="text-xs font-semibold" style={{ color: emp?.accent }}>{emp?.name}</span>
+            {task.handoffFrom && (
+              <span className="text-xs" style={{ color: '#5A7A99' }}>← {employees[task.handoffFrom]?.name}</span>
+            )}
+          </div>
+          <div className="flex items-center gap-1">
+            <span className="text-xs px-1.5 py-0.5 rounded font-medium" style={{ background: typeColor[task.type] || '#1A3350', color: '#8899AA' }}>
+              {TYPE_LABEL[task.type] || task.type}
+            </span>
+            <span className="text-xs px-1.5 py-0.5 rounded" style={{ background: '#0D1F35', color: '#4A6A8A' }}>
+              {BRAND_LABEL[task.brand]}
+            </span>
+            <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: PRIORITY_DOT[task.priority] }} title={task.priority} />
+          </div>
         </div>
-        <div className="flex items-center gap-1.5">
-          <span className="text-xs px-1.5 py-0.5 rounded" style={{ background: '#0B1829', color: '#5A7A99' }}>
-            {BRAND_LABEL[task.brand]}
-          </span>
-          <span className="text-xs px-1.5 py-0.5 rounded" style={{ background: '#0B1829', color: PRIORITY_COLOR[task.priority] }}>
-            {task.priority}
-          </span>
-        </div>
-      </div>
 
-      {/* Title */}
-      <div className="text-sm font-semibold mb-1" style={{ color: '#E8EDF2' }}>{task.title}</div>
-      <p className="text-xs leading-relaxed mb-3" style={{ color: '#8899AA' }}>{task.description}</p>
+        {/* Title */}
+        <div className="text-sm font-semibold mb-1 leading-snug" style={{ color: '#E8EDF2' }}>{task.title}</div>
+        <p className="text-xs leading-relaxed" style={{ color: '#5A7A99' }}>{task.description}</p>
 
-      {/* Output */}
-      {(output || task.output) && (
-        <div className="mb-3">
-          <button
-            onClick={() => setShowOutput(v => !v)}
-            className="text-xs mb-1.5"
-            style={{ color: '#5CB85C' }}
-          >
-            {showOutput ? '▼' : '▶'} View output
-          </button>
-          {showOutput && (
-            <div
-              className="text-xs leading-relaxed p-3 rounded-lg whitespace-pre-wrap prose-chat overflow-auto"
-              style={{ background: '#0B1829', color: '#8899AA', maxHeight: '200px', border: '1px solid #1A3350' }}
-              dangerouslySetInnerHTML={{ __html: formatMsg(output || task.output) }}
-            />
+        {/* Running */}
+        {isRunning && (
+          <div className="flex items-center gap-2 mt-3 text-xs" style={{ color: '#5A7A99' }}>
+            <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ background: emp?.accent }} />
+            {emp?.name} is working...
+          </div>
+        )}
+
+        {/* Output */}
+        {(output || task.output) && (
+          <div className="mt-3">
+            <button onClick={() => setShowOutput(v => !v)} className="flex items-center gap-1.5 text-xs font-medium" style={{ color: '#5CB85C' }}>
+              <span>{showOutput ? '▼' : '▶'}</span>
+              <span>{showOutput ? 'Hide output' : 'View output'}</span>
+            </button>
+            {showOutput && (
+              <div
+                className="mt-2 text-xs leading-relaxed p-3 rounded-lg overflow-auto prose-chat"
+                style={{ background: '#0B1829', color: '#8899AA', maxHeight: '180px', border: '1px solid #1A3350' }}
+                dangerouslySetInnerHTML={{ __html: formatMsg(output || task.output) }}
+              />
+            )}
+          </div>
+        )}
+
+        {/* Actions */}
+        <div className="flex items-center gap-2 mt-3 pt-3" style={{ borderTop: '1px solid #0D1F35' }}>
+          {task.status === 'pending' && (
+            <>
+              <button onClick={onApprove} className="text-xs px-3 py-1.5 rounded-lg font-semibold transition-opacity hover:opacity-80"
+                style={{ background: '#4A90D922', color: '#4A90D9', border: '1px solid #4A90D944' }}>
+                Approve
+              </button>
+              <button onClick={onReject} className="text-xs px-3 py-1.5 rounded-lg transition-opacity hover:opacity-80"
+                style={{ background: '#1A3350', color: '#5A7A99' }}>
+                Reject
+              </button>
+            </>
           )}
-        </div>
-      )}
-
-      {/* Running indicator */}
-      {isRunning && !output && (
-        <div className="flex items-center gap-1.5 mb-3 text-xs" style={{ color: '#5A7A99' }}>
-          <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ background: emp?.accent }} />
-          {emp?.name} is working...
-        </div>
-      )}
-
-      {/* Actions */}
-      <div className="flex items-center gap-2 flex-wrap">
-        {task.status === 'pending' && (
-          <>
-            <button onClick={onApprove} className="text-xs px-2.5 py-1 rounded font-medium" style={{ background: '#4A90D922', color: '#4A90D9', border: '1px solid #4A90D944' }}>
-              Approve
+          {task.status === 'approved' && (
+            <>
+              <button onClick={onRun} disabled={isRunning}
+                className="text-xs px-3 py-1.5 rounded-lg font-semibold disabled:opacity-50 transition-opacity hover:opacity-80"
+                style={{ background: `${emp?.accent}22`, color: emp?.accent, border: `1px solid ${emp?.accent}44` }}>
+                {isRunning ? 'Running...' : '▶ Run'}
+              </button>
+              <button onClick={onMarkDone} className="text-xs px-2.5 py-1.5 rounded-lg transition-opacity hover:opacity-80"
+                style={{ background: '#1A3350', color: '#5A7A99' }}>
+                Mark done
+              </button>
+            </>
+          )}
+          {task.status === 'rejected' && (
+            <button onClick={onApprove} className="text-xs px-2.5 py-1.5 rounded-lg"
+              style={{ background: '#1A3350', color: '#5A7A99' }}>
+              Restore
             </button>
-            <button onClick={onReject} className="text-xs px-2.5 py-1 rounded" style={{ background: '#1A3350', color: '#5A7A99' }}>
-              Reject
-            </button>
-          </>
-        )}
-        {task.status === 'approved' && (
-          <>
-            <button
-              onClick={onRun}
-              disabled={isRunning}
-              className="text-xs px-2.5 py-1 rounded font-medium disabled:opacity-50"
-              style={{ background: `${emp?.accent}22`, color: emp?.accent, border: `1px solid ${emp?.accent}44` }}
-            >
-              {isRunning ? 'Running...' : '▶ Run'}
-            </button>
-            <button onClick={onMarkDone} className="text-xs px-2.5 py-1 rounded" style={{ background: '#1A3350', color: '#5A7A99' }}>
-              Mark done
-            </button>
-          </>
-        )}
-        {task.status === 'rejected' && (
-          <button onClick={onApprove} className="text-xs px-2.5 py-1 rounded" style={{ background: '#1A3350', color: '#5A7A99' }}>
-            Restore
+          )}
+          <button onClick={onDelete} className="ml-auto text-xs w-6 h-6 flex items-center justify-center rounded transition-opacity hover:opacity-80"
+            style={{ color: '#2A4560' }}>✕
           </button>
-        )}
-        <button onClick={onDelete} className="text-xs ml-auto" style={{ color: '#2A4560' }}>✕</button>
+        </div>
       </div>
 
-      {/* Handoff — shown on done tasks with output */}
+      {/* Handoff bar */}
       {task.status === 'done' && (task.output || output) && (
-        <div className="mt-3 pt-3 flex items-center gap-2" style={{ borderTop: '1px solid #1A3350' }}>
-          <span className="text-xs" style={{ color: '#5A7A99' }}>Hand off →</span>
-          <select
-            value={handoffTo}
-            onChange={e => setHandoffTo(e.target.value)}
-            className="flex-1 text-xs rounded px-2 py-1 outline-none"
-            style={{ background: '#0B1829', color: '#8899AA', border: '1px solid #1A3350' }}
-          >
+        <div className="px-4 py-2.5 flex items-center gap-2" style={{ background: '#0D1F35', borderTop: '1px solid #1A3350' }}>
+          <span className="text-xs" style={{ color: '#3A5A7A' }}>Hand off →</span>
+          <select value={handoffTo} onChange={e => setHandoffTo(e.target.value)}
+            className="flex-1 text-xs rounded-lg px-2 py-1 outline-none"
+            style={{ background: '#112236', color: '#5A7A99', border: '1px solid #1A3350' }}>
             <option value="">Pick employee...</option>
             {Object.values(employees).filter(e => e.id !== task.employee).map(e => (
               <option key={e.id} value={e.id}>{e.emoji} {e.name}</option>
             ))}
           </select>
-          <button
-            onClick={doHandoff}
-            disabled={!handoffTo || handing}
-            className="text-xs px-2.5 py-1 rounded disabled:opacity-40"
-            style={{ background: '#4A90D922', color: '#4A90D9', border: '1px solid #4A90D944' }}
-          >
+          <button onClick={doHandoff} disabled={!handoffTo || handing}
+            className="text-xs px-2.5 py-1 rounded-lg font-medium disabled:opacity-40 transition-opacity hover:opacity-80"
+            style={{ background: '#4A90D922', color: '#4A90D9', border: '1px solid #4A90D944' }}>
             {handing ? '...' : 'Send'}
           </button>
         </div>
@@ -386,8 +480,7 @@ function formatMsg(content) {
   return content
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
     .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-    .replace(/^### (.+)$/gm, '<h3>$1</h3>')
-    .replace(/^## (.+)$/gm, '<h3>$1</h3>')
+    .replace(/^### (.+)$/gm, '<h3>$1</h3>').replace(/^## (.+)$/gm, '<h3>$1</h3>')
     .replace(/^- (.+)$/gm, '<li>$1</li>')
     .replace(/(<li>.*<\/li>\n?)+/g, m => `<ul>${m}</ul>`)
     .replace(/`([^`]+)`/g, '<code>$1</code>')
