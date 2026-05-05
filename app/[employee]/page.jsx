@@ -532,10 +532,14 @@ export default function EmployeePage() {
           {/* Avatar */}
           <div className="flex items-center gap-3 mb-5">
             <div
-              className="w-14 h-14 rounded-full flex items-center justify-center text-3xl"
-              style={{ background: `${emp.accent}22`, border: `1px solid ${emp.accent}55` }}
+              className="w-14 h-14 rounded-full overflow-hidden flex-shrink-0"
+              style={{ background: `${emp.accent}22`, border: `2px solid ${emp.accent}66` }}
             >
-              {emp.emoji}
+              <img
+                src={`https://api.dicebear.com/9.x/personas/svg?seed=${emp.name}&backgroundColor=transparent`}
+                alt={emp.name}
+                className="w-full h-full object-cover"
+              />
             </div>
             <div>
               <div className="font-semibold" style={{ color: '#E8EDF2' }}>{emp.name}</div>
@@ -748,10 +752,14 @@ export default function EmployeePage() {
               <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
                 {msg.role === 'assistant' && (
                   <div
-                    className="w-7 h-7 rounded-full flex items-center justify-center text-sm flex-shrink-0 mt-1 mr-3"
-                    style={{ background: `${emp.accent}22`, border: `1px solid ${emp.accent}44` }}
+                    className="w-7 h-7 rounded-full overflow-hidden flex-shrink-0 mt-1 mr-3"
+                    style={{ border: `1px solid ${emp.accent}44`, background: `${emp.accent}22` }}
                   >
-                    {emp.emoji}
+                    <img
+                      src={`https://api.dicebear.com/9.x/personas/svg?seed=${emp.name}&backgroundColor=transparent`}
+                      alt={emp.name}
+                      className="w-full h-full object-cover"
+                    />
                   </div>
                 )}
                 <div
@@ -769,10 +777,14 @@ export default function EmployeePage() {
             {loading && messages[messages.length - 1]?.role === 'user' && (
               <div className="flex justify-start">
                 <div
-                  className="w-7 h-7 rounded-full flex items-center justify-center text-sm mr-3 mt-1 flex-shrink-0"
-                  style={{ background: `${emp.accent}22`, border: `1px solid ${emp.accent}44` }}
+                  className="w-7 h-7 rounded-full overflow-hidden mr-3 mt-1 flex-shrink-0"
+                  style={{ border: `1px solid ${emp.accent}44`, background: `${emp.accent}22` }}
                 >
-                  {emp.emoji}
+                  <img
+                    src={`https://api.dicebear.com/9.x/personas/svg?seed=${emp.name}&backgroundColor=transparent`}
+                    alt={emp.name}
+                    className="w-full h-full object-cover"
+                  />
                 </div>
                 <div className="flex items-center gap-1.5 px-4 py-3 rounded-xl" style={{ background: '#112236', border: '1px solid #1A3350' }}>
                   <span className="w-1.5 h-1.5 rounded-full animate-bounce" style={{ background: emp.accent, animationDelay: '0ms' }} />

@@ -86,10 +86,14 @@ function EmployeeCard({ emp, pending }) {
         <div className="flex items-start justify-between mb-4">
           <div className="flex items-center gap-3">
             <div
-              className="w-12 h-12 rounded-full flex items-center justify-center text-2xl flex-shrink-0"
-              style={{ background: `${emp.accent}22`, border: `1px solid ${emp.accent}44` }}
+              className="w-12 h-12 rounded-full flex-shrink-0 overflow-hidden"
+              style={{ border: `2px solid ${emp.accent}66`, background: `${emp.accent}22` }}
             >
-              {emp.emoji}
+              <img
+                src={`https://api.dicebear.com/9.x/personas/svg?seed=${emp.name}&backgroundColor=transparent`}
+                alt={emp.name}
+                className="w-full h-full object-cover"
+              />
             </div>
             <div>
               <div className="font-semibold text-base" style={{ color: '#E8EDF2' }}>{emp.name}</div>
