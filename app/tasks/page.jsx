@@ -92,7 +92,13 @@ export default function TaskBoard() {
     setTaskOutputs(o => ({ ...o, [task.id]: '' }))
     const emp = employees[task.employee]
     const context = task.handoffContext ? `\n\nContext from handoff:\n${task.handoffContext}` : ''
-    const prompt = `Execute this task and produce the actual output:\n\n**Task:** ${task.title}\n**Brief:** ${task.description}\n**Brand:** ${BRAND_LABEL[task.brand]}${context}\n\nProduce the complete deliverable now. No preamble.`
+
+    // If this task targets a specific file, instruct Claude to output ONLY the file content
+    const fileInstruction = task.filePath
+      ? `\n\nIMPORTANT: Your output will be committed directly to \`${task.filePath}\` in the ${task.repo} repo. Output ONLY the complete file content — no preamble, no explanation, no markdown fences. Start immediately with the file content.`
+      : `\n\nProduce the complete deliverable now. No preamble.`
+
+    const prompt = `Execute this task and produce the actual output:\n\n**Task:** ${task.title}\n**Brief:** ${task.description}\n**Brand:** ${BRAND_LABEL[task.brand]}${context}${fileInstruction}`
 
     try {
       const res = await fetch('/api/chat', {
@@ -342,8 +348,57 @@ function TaskCard({ task, colColor, onApprove, onReject, onDelete, onRun, onMark
   const [showOutput, setShowOutput] = useState(false)
   const [handoffTo, setHandoffTo]   = useState('')
   const [handing, setHanding]       = useState(false)
+  const [pushing, setPushing]       = useState(false)
+  const [prUrl, setPrUrl]           = useState(task.prUrl || '')
+  const [prError, setPrError]       = useState('')
 
   useEffect(() => { if (output) setShowOutput(true) }, [output])
+
+  async function pushToGitHub() {
+    const content = output || task.output
+    if (!content || !task.filePath || !task.repo) return
+    setPushing(true); setPrError('')
+    try {
+      // Read current SHA (file may not exist yet)
+      let currentSha
+      try {
+        const readRes = await fetch('/api/github/read', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ repo: task.repo, path: task.filePath }),
+        })
+        const readData = await readRes.json()
+        if (readData.type === 'file') currentSha = readData.sha
+      } catch {}
+
+      const writeRes = await fetch('/api/github/write', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          repo: task.repo,
+          path: task.filePath,
+          content,
+          message: `[${task.employee}] ${task.title}`,
+          currentSha,
+        }),
+      })
+      const writeData = await writeRes.json()
+      if (writeData.pr_url) {
+        setPrUrl(writeData.pr_url)
+        await fetch(`/api/tasks/${task.id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ prUrl: writeData.pr_url }),
+        })
+      } else {
+        setPrError(writeData.error || 'PR creation failed')
+      }
+    } catch (e) {
+      setPrError('Request failed')
+    } finally {
+      setPushing(false)
+    }
+  }
 
   async function doHandoff() {
     if (!handoffTo) return
@@ -399,10 +454,35 @@ function TaskCard({ task, colColor, onApprove, onReject, onDelete, onRun, onMark
         {/* Output */}
         {(output || task.output) && (
           <div className="mt-3">
-            <button onClick={() => setShowOutput(v => !v)} className="flex items-center gap-1.5 text-xs font-medium" style={{ color: '#5CB85C' }}>
-              <span>{showOutput ? '▼' : '▶'}</span>
-              <span>{showOutput ? 'Hide output' : 'View output'}</span>
-            </button>
+            <div className="flex items-center justify-between mb-1">
+              <button onClick={() => setShowOutput(v => !v)} className="flex items-center gap-1.5 text-xs font-medium" style={{ color: '#5CB85C' }}>
+                <span>{showOutput ? '▼' : '▶'}</span>
+                <span>{showOutput ? 'Hide output' : 'View output'}</span>
+              </button>
+              {/* Auto-PR button for file-targeting tasks */}
+              {task.filePath && task.repo && (
+                prUrl ? (
+                  <a href={prUrl} target="_blank" rel="noreferrer"
+                    className="text-xs px-2 py-0.5 rounded font-medium"
+                    style={{ background: '#5CB85C22', color: '#5CB85C', border: '1px solid #5CB85C44' }}>
+                    ✓ PR open ↗
+                  </a>
+                ) : (
+                  <button onClick={pushToGitHub} disabled={pushing}
+                    className="text-xs px-2 py-0.5 rounded font-medium disabled:opacity-50"
+                    style={{ background: '#4A90D922', color: '#4A90D9', border: '1px solid #4A90D944' }}>
+                    {pushing ? 'Pushing...' : '→ Push to GitHub'}
+                  </button>
+                )
+              )}
+            </div>
+            {prError && <div className="text-xs mb-1" style={{ color: '#E84393' }}>{prError}</div>}
+            {/* File target indicator */}
+            {task.filePath && (
+              <div className="text-xs mb-1.5 font-mono" style={{ color: '#2A4560' }}>
+                {task.repo}/{task.filePath}
+              </div>
+            )}
             {showOutput && (
               <div
                 className="mt-2 text-xs leading-relaxed p-3 rounded-lg overflow-auto prose-chat"

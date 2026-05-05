@@ -34,6 +34,179 @@ const REPO_KEY_FILES = {
   ],
 }
 
+const GSC_SITES = {
+  afix:   { siteUrl: 'https://afix.sg/', sitemap: 'https://afix.sg/sitemap.xml',     label: 'afix.sg' },
+  atsell: { siteUrl: 'https://atsell.io/', sitemap: 'https://atsell.io/sitemap.xml', label: 'atsell.io' },
+}
+
+function GscPanel({ emp, onLoadToContext }) {
+  const [site, setSite]           = useState('atsell')
+  const [inspectUrl, setInspectUrl] = useState('')
+  const [loading, setLoading]     = useState(false)
+  const [status, setStatus]       = useState(null) // { ok, message } | null
+  const [sitemaps, setSitemaps]   = useState(null)
+  const [inspectResult, setInspectResult] = useState(null)
+  const [notConfigured, setNotConfigured] = useState(false)
+
+  const cfg = GSC_SITES[site]
+
+  async function gscPost(payload) {
+    setLoading(true); setStatus(null)
+    try {
+      const res = await fetch('/api/gsc', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...payload, siteUrl: cfg.siteUrl }),
+      })
+      const data = await res.json()
+      if (data.setup) { setNotConfigured(true); return null }
+      setNotConfigured(false)
+      return data
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  async function submitSitemap() {
+    const data = await gscPost({ action: 'submit-sitemap', feedpath: cfg.sitemap })
+    if (data) setStatus({ ok: data.ok, message: data.message || data.error })
+  }
+
+  async function listSitemaps() {
+    const data = await gscPost({ action: 'list-sitemaps' })
+    if (data?.sitemaps) setSitemaps(data.sitemaps)
+  }
+
+  async function inspectUrlFn() {
+    if (!inspectUrl.trim()) return
+    const data = await gscPost({ action: 'inspect-url', inspectUrl: inspectUrl.trim() })
+    if (data?.result) {
+      setInspectResult(data.result)
+      onLoadToContext(`GSC URL Inspection: ${inspectUrl}\n${JSON.stringify(data.result, null, 2)}`)
+    }
+  }
+
+  return (
+    <div className="mt-5 pt-5" style={{ borderTop: '1px solid #1A3350' }}>
+      <div className="text-xs font-semibold uppercase tracking-wider mb-3" style={{ color: '#5A7A99' }}>
+        Search Console
+      </div>
+
+      {notConfigured ? (
+        <div className="text-xs p-3 rounded-lg" style={{ background: '#1A3350', color: '#8899AA' }}>
+          <p className="mb-2 font-semibold" style={{ color: '#C9A026' }}>GSC not connected yet</p>
+          <p className="mb-1">Add these env vars to Vercel:</p>
+          <code className="block text-xs" style={{ color: '#5A7A99' }}>GOOGLE_CLIENT_EMAIL</code>
+          <code className="block text-xs" style={{ color: '#5A7A99' }}>GOOGLE_PRIVATE_KEY</code>
+          <a href="https://console.cloud.google.com" target="_blank" rel="noreferrer"
+            className="block mt-2 underline" style={{ color: emp.accent }}>
+            Set up service account →
+          </a>
+        </div>
+      ) : (
+        <>
+          {/* Site selector */}
+          <div className="flex gap-1 mb-3">
+            {Object.entries(GSC_SITES).map(([key, s]) => (
+              <button key={key} onClick={() => { setSite(key); setStatus(null); setSitemaps(null); setInspectResult(null) }}
+                className="flex-1 text-xs py-1 rounded transition-colors"
+                style={{
+                  background: site === key ? emp.accent : '#0B1829',
+                  color: site === key ? '#0B1829' : '#5A7A99',
+                  border: `1px solid ${site === key ? emp.accent : '#1A3350'}`,
+                }}>
+                {s.label}
+              </button>
+            ))}
+          </div>
+
+          {/* Sitemap actions */}
+          <div className="flex gap-1 mb-2">
+            <button onClick={submitSitemap} disabled={loading}
+              className="flex-1 text-xs py-1.5 rounded font-medium disabled:opacity-50 transition-opacity"
+              style={{ background: `${emp.accent}22`, color: emp.accent, border: `1px solid ${emp.accent}44` }}>
+              {loading ? '...' : '↑ Submit sitemap'}
+            </button>
+            <button onClick={listSitemaps} disabled={loading}
+              className="text-xs px-2.5 py-1.5 rounded disabled:opacity-50"
+              style={{ background: '#1A3350', color: '#5A7A99' }}>
+              List
+            </button>
+          </div>
+
+          {status && (
+            <div className="text-xs mb-2 px-2 py-1.5 rounded" style={{
+              background: status.ok ? '#5CB85C22' : '#E8439322',
+              color: status.ok ? '#5CB85C' : '#E84393',
+              border: `1px solid ${status.ok ? '#5CB85C44' : '#E8439344'}`,
+            }}>
+              {status.ok ? '✓ ' : '✗ '}{status.message}
+            </div>
+          )}
+
+          {sitemaps && (
+            <div className="mb-3 space-y-1">
+              {sitemaps.length === 0 && <div className="text-xs" style={{ color: '#2A4560' }}>No sitemaps found</div>}
+              {sitemaps.map((s, i) => (
+                <div key={i} className="text-xs px-2 py-1 rounded flex justify-between" style={{ background: '#0B1829', color: '#5A7A99' }}>
+                  <span className="truncate">{s.path?.split('/').slice(-1)[0] || s.path}</span>
+                  <span style={{ color: s.warnings > 0 ? '#C9A026' : '#5CB85C' }}>
+                    {s.warnings > 0 ? `${s.warnings} warn` : `${s.submitted || 0} urls`}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* URL inspector */}
+          <div className="text-xs font-semibold uppercase tracking-wider mb-2 mt-3" style={{ color: '#2A4560' }}>
+            Inspect URL
+          </div>
+          <div className="flex gap-1 mb-2">
+            <input
+              type="text"
+              placeholder={`${cfg.siteUrl}path/to/page`}
+              value={inspectUrl}
+              onChange={e => setInspectUrl(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && inspectUrlFn()}
+              className="flex-1 text-xs px-2 py-1.5 rounded outline-none"
+              style={{ background: '#0B1829', border: '1px solid #1A3350', color: '#8899AA' }}
+            />
+            <button onClick={inspectUrlFn} disabled={loading || !inspectUrl.trim()}
+              className="text-xs px-2.5 py-1.5 rounded disabled:opacity-40"
+              style={{ background: '#1A3350', color: '#5A7A99' }}>
+              Go
+            </button>
+          </div>
+
+          {inspectResult && (
+            <div className="text-xs p-2 rounded space-y-1" style={{ background: '#0B1829', border: '1px solid #1A3350' }}>
+              <div className="flex justify-between">
+                <span style={{ color: '#5A7A99' }}>Index status</span>
+                <span style={{ color: inspectResult.indexStatusResult?.coverageState === 'Submitted and indexed' ? '#5CB85C' : '#C9A026' }}>
+                  {inspectResult.indexStatusResult?.coverageState || 'Unknown'}
+                </span>
+              </div>
+              <div className="flex justify-between">
+                <span style={{ color: '#5A7A99' }}>Crawl allowed</span>
+                <span style={{ color: '#8899AA' }}>{inspectResult.indexStatusResult?.robotsTxtState || '—'}</span>
+              </div>
+              <div className="flex justify-between">
+                <span style={{ color: '#5A7A99' }}>Last crawl</span>
+                <span style={{ color: '#8899AA' }}>
+                  {inspectResult.indexStatusResult?.lastCrawlTime
+                    ? new Date(inspectResult.indexStatusResult.lastCrawlTime).toLocaleDateString()
+                    : '—'}
+                </span>
+              </div>
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  )
+}
+
 function HiggsfieldPanel({ emp, onLoadToContext }) {
   const [tab, setTab] = useState('image')
   const [model, setModel] = useState('flux')
@@ -606,6 +779,17 @@ export default function EmployeePage() {
           {/* GitHub panel */}
           {emp.github && (
             <GitHubPanel
+              emp={emp}
+              onLoadToContext={content => {
+                setLiveContext(content)
+                setShowContextBox(true)
+              }}
+            />
+          )}
+
+          {/* GSC panel */}
+          {emp.gsc && (
+            <GscPanel
               emp={emp}
               onLoadToContext={content => {
                 setLiveContext(content)
