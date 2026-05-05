@@ -1,58 +1,51 @@
 export const maxDuration = 60
 
-const BASE_URL = 'https://platform.higgsfield.ai'
-
-const IMAGE_ENDPOINTS = {
-  flux: '/flux-pro/kontext/max/text-to-image',
-  soul: '/v1/text2image/soul',
-}
-
-const VIDEO_ENDPOINT = '/v1/image2video/dop'
-
-function getAuthHeader(apiKey) {
-  // Key format from cloud.higgsfield.ai can be:
-  // "KEY_ID:KEY_SECRET" → use as-is with "Key " prefix
-  // Single token → try Bearer
-  if (apiKey.includes(':')) {
-    return `Key ${apiKey}`
-  }
-  return `Bearer ${apiKey}`
-}
+const BASE_URL = 'https://api.higgsfield.ai'
 
 async function higgsfieldFetch(path, options = {}) {
   const apiKey = process.env.HIGGSFIELD_API_KEY
   const res = await fetch(`${BASE_URL}${path}`, {
     ...options,
     headers: {
-      Authorization: getAuthHeader(apiKey),
+      Authorization: `Bearer ${apiKey}`,
       'Content-Type': 'application/json',
       ...options.headers,
     },
   })
   const text = await res.text()
-  try {
-    return { ok: res.ok, status: res.status, data: JSON.parse(text) }
-  } catch {
-    return { ok: res.ok, status: res.status, data: { error: text } }
-  }
+  let data
+  try { data = JSON.parse(text) } catch { data = { raw: text } }
+  return { ok: res.ok, status: res.status, data }
 }
 
-async function pollUntilDone(requestId, maxWaitMs = 55000) {
+async function pollUntilDone(id, maxWaitMs = 55000) {
   const start = Date.now()
-  const POLL_INTERVAL = 2500
-
   while (Date.now() - start < maxWaitMs) {
-    await new Promise(r => setTimeout(r, POLL_INTERVAL))
-    const { ok, data } = await higgsfieldFetch(`/requests/${requestId}/status`)
+    await new Promise(r => setTimeout(r, 3000))
+    const { ok, data } = await higgsfieldFetch(`/v1/generations/${id}`)
     if (!ok) continue
-
     const status = data.status
-    if (status === 'completed') return { success: true, data }
-    if (status === 'failed') return { success: false, error: 'Generation failed' }
+    if (status === 'completed' || status === 'succeeded') return { success: true, data }
+    if (status === 'failed' || status === 'error') return { success: false, error: data.error || 'Generation failed' }
     if (status === 'nsfw') return { success: false, error: 'Content flagged as NSFW' }
-    // queued / in_progress → keep polling
+    // queued / processing / in_progress → keep polling
   }
   return { success: false, error: 'Timed out after 55s' }
+}
+
+function extractUrl(data) {
+  // Try common response shapes
+  return (
+    data?.output?.[0] ||
+    data?.output ||
+    data?.url ||
+    data?.image_url ||
+    data?.video_url ||
+    data?.result?.url ||
+    data?.results?.[0]?.url ||
+    data?.jobs?.[0]?.results?.raw?.url ||
+    null
+  )
 }
 
 export async function POST(req) {
@@ -68,57 +61,65 @@ export async function POST(req) {
     return Response.json({ error: 'prompt is required' }, { status: 400 })
   }
 
-  let endpoint, input
+  // Build request body
+  let requestBody
 
   if (type === 'image') {
-    endpoint = IMAGE_ENDPOINTS[model] || IMAGE_ENDPOINTS.flux
-    input = {
+    // Derive width/height from aspect ratio
+    const dims = {
+      '1:1':  { width: 1024, height: 1024 },
+      '9:16': { width: 768,  height: 1360 },
+      '16:9': { width: 1360, height: 768  },
+      '4:5':  { width: 820,  height: 1024 },
+    }[aspectRatio || '1:1'] || { width: 1024, height: 1024 }
+
+    requestBody = {
+      task: 'text-to-image',
+      model: model === 'soul' ? 'soul' : 'flux',
       prompt: prompt.trim(),
-      aspect_ratio: aspectRatio || '1:1',
-      safety_tolerance: 2,
+      ...dims,
+      steps: 30,
     }
   } else if (type === 'video') {
-    endpoint = VIDEO_ENDPOINT
-    input = {
-      model: 'dop-turbo',
+    requestBody = {
+      task: 'image-to-video',
+      model: 'default-video-model',
       prompt: prompt.trim(),
-      ...(inputImageUrl?.trim() ? {
-        input_images: [{ type: 'image_url', image_url: inputImageUrl.trim() }],
-      } : {}),
+      ...(inputImageUrl?.trim() ? { input_image: inputImageUrl.trim() } : {}),
     }
   } else {
     return Response.json({ error: 'type must be image or video' }, { status: 400 })
   }
 
   // Submit job
-  const submit = await higgsfieldFetch(endpoint, {
+  const submit = await higgsfieldFetch('/v1/generations', {
     method: 'POST',
-    body: JSON.stringify(input),
+    body: JSON.stringify(requestBody),
   })
 
   if (!submit.ok) {
-    const msg = submit.data?.message || submit.data?.error || `HTTP ${submit.status}`
-    return Response.json({ error: `Higgsfield error: ${msg}` }, { status: 502 })
+    const msg = submit.data?.message || submit.data?.error || submit.data?.detail || `HTTP ${submit.status}`
+    return Response.json({ error: `Higgsfield: ${msg}` }, { status: 502 })
   }
 
-  const requestId = submit.data?.request_id
-  if (!requestId) {
-    return Response.json({
-      error: 'No request_id returned',
-      debug: submit.data,
-    }, { status: 502 })
+  // Check if result came back immediately
+  const immediateUrl = extractUrl(submit.data)
+  if (immediateUrl) {
+    return Response.json({ ok: true, url: immediateUrl, type })
   }
 
-  // Poll for completion
-  const result = await pollUntilDone(requestId)
+  // Otherwise poll
+  const jobId = submit.data?.id || submit.data?.job_id || submit.data?.request_id
+  if (!jobId) {
+    return Response.json({ error: 'No job ID returned', debug: submit.data }, { status: 502 })
+  }
+
+  const result = await pollUntilDone(jobId)
   if (!result.success) {
     return Response.json({ error: result.error }, { status: 500 })
   }
 
-  // Extract URL from result
-  const job = result.data?.jobs?.[0]
-  const url = job?.results?.raw?.url || job?.results?.min?.url || result.data?.url
-
+  const url = extractUrl(result.data)
   if (!url) {
     return Response.json({ error: 'No output URL in response', debug: result.data }, { status: 500 })
   }
