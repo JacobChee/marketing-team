@@ -13,12 +13,47 @@ export default function EmployeePage() {
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
   const [activeTab, setActiveTab] = useState('afix')
+  const [mainTab, setMainTab] = useState('chat')
+  const [tasks, setTasks] = useState([])
+  const [generating, setGenerating] = useState(false)
   const messagesEndRef = useRef(null)
   const inputRef = useRef(null)
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
+
+  useEffect(() => {
+    if (!emp) return
+    fetch(`/api/tasks?employee=${emp.id}`)
+      .then(r => r.json())
+      .then(setTasks)
+      .catch(() => {})
+  }, [emp])
+
+  async function generateTasks(type) {
+    setGenerating(true)
+    try {
+      const res = await fetch('/api/tasks/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ employeeId: emp.id, type }),
+      })
+      const newTasks = await res.json()
+      setTasks(prev => [...newTasks, ...prev])
+    } finally {
+      setGenerating(false)
+    }
+  }
+
+  async function updateTask(id, updates) {
+    await fetch(`/api/tasks/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(updates),
+    })
+    setTasks(prev => prev.map(t => t.id === id ? { ...t, ...updates } : t))
+  }
 
   if (!emp) {
     return (
@@ -98,6 +133,28 @@ export default function EmployeePage() {
             <span className="font-semibold" style={{ color: '#E8EDF2' }}>{emp.name}</span>
             <span className="text-sm" style={{ color: emp.accent }}>{emp.role}</span>
           </div>
+          <div className="ml-auto flex items-center gap-1">
+            {['chat', 'tasks'].map(tab => (
+              <button
+                key={tab}
+                onClick={() => setMainTab(tab)}
+                className="text-xs px-3 py-1.5 rounded-lg capitalize transition-colors"
+                style={{
+                  background: mainTab === tab ? emp.accent : 'transparent',
+                  color: mainTab === tab ? '#0B1829' : '#5A7A99',
+                  fontWeight: mainTab === tab ? 600 : 400,
+                }}
+              >
+                {tab}
+                {tab === 'tasks' && tasks.filter(t => t.status === 'pending').length > 0 && (
+                  <span className="ml-1.5 w-4 h-4 inline-flex items-center justify-center rounded-full text-xs font-bold"
+                    style={{ background: mainTab === 'tasks' ? '#0B1829' : '#C9A026', color: mainTab === 'tasks' ? emp.accent : '#0B1829' }}>
+                    {tasks.filter(t => t.status === 'pending').length}
+                  </span>
+                )}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 
@@ -176,8 +233,90 @@ export default function EmployeePage() {
           </div>
         </div>
 
+        {/* Tasks panel */}
+        {mainTab === 'tasks' && (
+          <div className="flex-1 overflow-y-auto p-6">
+            <div className="flex items-center justify-between mb-5">
+              <h2 className="font-semibold" style={{ color: '#E8EDF2' }}>{emp.name}'s Tasks</h2>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => generateTasks('daily')}
+                  disabled={generating}
+                  className="text-xs px-3 py-1.5 rounded-lg disabled:opacity-50 transition-opacity"
+                  style={{ background: '#112236', color: '#8899AA', border: '1px solid #1A3350' }}
+                >
+                  {generating ? '...' : '+ Daily tasks'}
+                </button>
+                <button
+                  onClick={() => generateTasks('weekly')}
+                  disabled={generating}
+                  className="text-xs px-3 py-1.5 rounded-lg disabled:opacity-50 transition-opacity"
+                  style={{ background: '#112236', color: '#8899AA', border: '1px solid #1A3350' }}
+                >
+                  {generating ? '...' : '+ Weekly tasks'}
+                </button>
+              </div>
+            </div>
+            {tasks.length === 0 ? (
+              <div className="text-center py-16 text-sm" style={{ color: '#2A4560' }}>
+                No tasks yet — generate daily or weekly tasks above.
+              </div>
+            ) : (
+              <div className="space-y-3 max-w-2xl">
+                {['pending', 'approved', 'done', 'rejected'].map(status => {
+                  const group = tasks.filter(t => t.status === status)
+                  if (!group.length) return null
+                  const statusColors = { pending: '#C9A026', approved: '#4A90D9', done: '#5CB85C', rejected: '#2A4560' }
+                  const statusLabels = { pending: 'Pending Approval', approved: 'Approved', done: 'Done', rejected: 'Rejected' }
+                  return (
+                    <div key={status}>
+                      <div className="flex items-center gap-2 mb-2 mt-4">
+                        <span className="w-1.5 h-1.5 rounded-full" style={{ background: statusColors[status] }} />
+                        <span className="text-xs font-semibold uppercase tracking-wider" style={{ color: statusColors[status] }}>{statusLabels[status]}</span>
+                      </div>
+                      {group.map(task => (
+                        <div key={task.id} className="rounded-xl p-4 mb-2" style={{ background: '#112236', border: '1px solid #1A3350' }}>
+                          <div className="flex items-start justify-between gap-2 mb-1">
+                            <span className="text-sm font-semibold" style={{ color: '#E8EDF2' }}>{task.title}</span>
+                            <span className="text-xs px-1.5 py-0.5 rounded flex-shrink-0" style={{ background: '#0B1829', color: '#5A7A99' }}>
+                              {task.brand === 'afix' ? 'afix.sg' : task.brand === 'atsell' ? 'atsell.io' : 'Both'}
+                            </span>
+                          </div>
+                          <p className="text-xs mb-3" style={{ color: '#8899AA' }}>{task.description}</p>
+                          <div className="flex items-center gap-2">
+                            {status === 'pending' && (
+                              <>
+                                <button onClick={() => updateTask(task.id, { status: 'approved', approved_at: Date.now() })}
+                                  className="text-xs px-2.5 py-1 rounded font-medium"
+                                  style={{ background: '#4A90D922', color: '#4A90D9', border: '1px solid #4A90D944' }}>
+                                  Approve
+                                </button>
+                                <button onClick={() => updateTask(task.id, { status: 'rejected' })}
+                                  className="text-xs px-2.5 py-1 rounded"
+                                  style={{ background: '#1A3350', color: '#5A7A99' }}>
+                                  Reject
+                                </button>
+                              </>
+                            )}
+                            {status === 'approved' && (
+                              <Link href={`/tasks`} className="text-xs px-2.5 py-1 rounded font-medium"
+                                style={{ background: `${emp.accent}22`, color: emp.accent, border: `1px solid ${emp.accent}44` }}>
+                                Run on Task Board →
+                              </Link>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+          </div>
+        )}
+
         {/* Chat area */}
-        <div className="flex-1 flex flex-col overflow-hidden">
+        {mainTab === 'chat' && <div className="flex-1 flex flex-col overflow-hidden">
           {/* Messages */}
           <div className="flex-1 overflow-y-auto p-6 space-y-5">
             {messages.length === 0 && (
@@ -263,7 +402,7 @@ export default function EmployeePage() {
               Powered by Claude claude-sonnet-4-6 · {emp.skills.slice(0, 3).join(', ')}
             </p>
           </div>
-        </div>
+        </div>}
       </div>
     </div>
   )

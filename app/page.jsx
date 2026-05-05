@@ -1,10 +1,26 @@
 'use client'
 
+import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import './globals.css'
 import { employeeList } from '../lib/employees'
 
 export default function Dashboard() {
+  const [pendingCounts, setPendingCounts] = useState({})
+
+  useEffect(() => {
+    fetch('/api/tasks?status=pending')
+      .then(r => r.json())
+      .then(tasks => {
+        const counts = {}
+        tasks.forEach(t => { counts[t.employee] = (counts[t.employee] || 0) + 1 })
+        setPendingCounts(counts)
+      })
+      .catch(() => {})
+  }, [])
+
+  const totalPending = Object.values(pendingCounts).reduce((a, b) => a + b, 0)
+
   return (
     <div className="min-h-screen" style={{ background: '#0B1829' }}>
       {/* Header */}
@@ -18,9 +34,23 @@ export default function Dashboard() {
               afix.sg &nbsp;·&nbsp; atsell.io
             </p>
           </div>
-          <div className="flex items-center gap-2">
-            <span className="w-2 h-2 rounded-full bg-green-400 animate-pulse" />
-            <span className="text-xs" style={{ color: '#5A7A99' }}>6 online</span>
+          <div className="flex items-center gap-4">
+            <Link
+              href="/tasks"
+              className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-opacity hover:opacity-80"
+              style={{ background: '#112236', color: '#C9A026', border: '1px solid #1A3350' }}
+            >
+              Task Board
+              {totalPending > 0 && (
+                <span className="w-5 h-5 rounded-full text-xs flex items-center justify-center font-bold" style={{ background: '#C9A026', color: '#0B1829' }}>
+                  {totalPending}
+                </span>
+              )}
+            </Link>
+            <div className="flex items-center gap-2">
+              <span className="w-2 h-2 rounded-full bg-green-400 animate-pulse" />
+              <span className="text-xs" style={{ color: '#5A7A99' }}>6 online</span>
+            </div>
           </div>
         </div>
       </div>
@@ -29,7 +59,7 @@ export default function Dashboard() {
       <div className="max-w-6xl mx-auto px-6 py-10">
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
           {employeeList.map((emp) => (
-            <EmployeeCard key={emp.id} emp={emp} />
+            <EmployeeCard key={emp.id} emp={emp} pending={pendingCounts[emp.id] || 0} />
           ))}
         </div>
       </div>
@@ -37,15 +67,12 @@ export default function Dashboard() {
   )
 }
 
-function EmployeeCard({ emp }) {
+function EmployeeCard({ emp, pending }) {
   return (
     <Link href={`/${emp.id}`}>
       <div
         className="rounded-xl p-5 cursor-pointer transition-all duration-200 group"
-        style={{
-          background: '#112236',
-          border: '1px solid #1A3350',
-        }}
+        style={{ background: '#112236', border: '1px solid #1A3350' }}
         onMouseEnter={e => {
           e.currentTarget.style.borderColor = emp.accent
           e.currentTarget.style.transform = 'translateY(-2px)'
@@ -69,9 +96,16 @@ function EmployeeCard({ emp }) {
               <div className="text-xs" style={{ color: emp.accent }}>{emp.role}</div>
             </div>
           </div>
-          <span className="text-xs px-2 py-0.5 rounded-full" style={{ background: '#1A3350', color: '#5A7A99' }}>
-            online
-          </span>
+          <div className="flex items-center gap-2">
+            {pending > 0 && (
+              <span className="text-xs px-2 py-0.5 rounded-full font-semibold" style={{ background: '#C9A02633', color: '#C9A026', border: '1px solid #C9A02655' }}>
+                {pending} pending
+              </span>
+            )}
+            <span className="text-xs px-2 py-0.5 rounded-full" style={{ background: '#1A3350', color: '#5A7A99' }}>
+              online
+            </span>
+          </div>
         </div>
 
         {/* Tagline */}
@@ -82,11 +116,7 @@ function EmployeeCard({ emp }) {
         {/* Skills */}
         <div className="flex flex-wrap gap-1.5 mb-5">
           {emp.skills.slice(0, 4).map(skill => (
-            <span
-              key={skill}
-              className="text-xs px-2 py-0.5 rounded"
-              style={{ background: '#0B1829', color: '#5A7A99', border: '1px solid #1A3350' }}
-            >
+            <span key={skill} className="text-xs px-2 py-0.5 rounded" style={{ background: '#0B1829', color: '#5A7A99', border: '1px solid #1A3350' }}>
               {skill}
             </span>
           ))}
@@ -98,10 +128,7 @@ function EmployeeCard({ emp }) {
         </div>
 
         {/* CTA */}
-        <div
-          className="flex items-center justify-between text-sm font-medium"
-          style={{ color: emp.accent }}
-        >
+        <div className="flex items-center justify-between text-sm font-medium" style={{ color: emp.accent }}>
           <span>Chat with {emp.name}</span>
           <span className="group-hover:translate-x-1 transition-transform duration-150">→</span>
         </div>
