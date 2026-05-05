@@ -35,8 +35,8 @@ const REPO_KEY_FILES = {
 }
 
 const GSC_SITES = {
-  afix:   { siteUrl: 'https://afix.sg/', sitemap: 'https://afix.sg/sitemap.xml',     label: 'afix.sg' },
-  atsell: { siteUrl: 'https://atsell.io/', sitemap: 'https://atsell.io/sitemap.xml', label: 'atsell.io' },
+  afix:   { siteUrl: 'sc-domain:afix.sg',   sitemap: 'https://afix.sg/sitemap.xml',     label: 'afix.sg' },
+  atsell: { siteUrl: 'sc-domain:atsell.io', sitemap: 'https://atsell.io/sitemap.xml',   label: 'atsell.io' },
 }
 
 function GscPanel({ emp, onLoadToContext }) {
@@ -96,12 +96,9 @@ function GscPanel({ emp, onLoadToContext }) {
         <div className="text-xs p-3 rounded-lg" style={{ background: '#1A3350', color: '#8899AA' }}>
           <p className="mb-2 font-semibold" style={{ color: '#C9A026' }}>GSC not connected yet</p>
           <p className="mb-1">Add these env vars to Vercel:</p>
-          <code className="block text-xs" style={{ color: '#5A7A99' }}>GOOGLE_CLIENT_EMAIL</code>
-          <code className="block text-xs" style={{ color: '#5A7A99' }}>GOOGLE_PRIVATE_KEY</code>
-          <a href="https://console.cloud.google.com" target="_blank" rel="noreferrer"
-            className="block mt-2 underline" style={{ color: emp.accent }}>
-            Set up service account →
-          </a>
+          <code className="block text-xs" style={{ color: '#5A7A99' }}>GOOGLE_CLIENT_ID</code>
+          <code className="block text-xs" style={{ color: '#5A7A99' }}>GOOGLE_CLIENT_SECRET</code>
+          <code className="block text-xs" style={{ color: '#5A7A99' }}>GOOGLE_REFRESH_TOKEN</code>
         </div>
       ) : (
         <>
