@@ -35,8 +35,8 @@ const REPO_KEY_FILES = {
 }
 
 const GSC_SITES = {
-  afix:   { siteUrl: 'sc-domain:afix.sg',   sitemap: 'https://afix.sg/sitemap.xml',     label: 'afix.sg' },
-  atsell: { siteUrl: 'sc-domain:atsell.io', sitemap: 'https://atsell.io/sitemap.xml',   label: 'atsell.io' },
+  afix:   { siteUrl: 'https://afix.sg/',    sitemap: 'https://afix.sg/sitemap.xml',   label: 'afix.sg' },
+  atsell: { siteUrl: 'sc-domain:atsell.io', sitemap: 'https://atsell.io/sitemap.xml', label: 'atsell.io' },
 }
 
 function GscPanel({ emp, onLoadToContext }) {
