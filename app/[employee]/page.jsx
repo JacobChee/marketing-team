@@ -16,6 +16,10 @@ export default function EmployeePage() {
   const [mainTab, setMainTab] = useState('chat')
   const [tasks, setTasks] = useState([])
   const [generating, setGenerating] = useState(false)
+  const [memory, setMemory] = useState('')
+  const [memorySaved, setMemorySaved] = useState(false)
+  const [liveContext, setLiveContext] = useState('')
+  const [showContextBox, setShowContextBox] = useState(false)
   const messagesEndRef = useRef(null)
   const inputRef = useRef(null)
 
@@ -29,7 +33,21 @@ export default function EmployeePage() {
       .then(r => r.json())
       .then(setTasks)
       .catch(() => {})
+    fetch(`/api/memory/${emp.id}`)
+      .then(r => r.json())
+      .then(d => setMemory(d.memory || ''))
+      .catch(() => {})
   }, [emp])
+
+  async function saveMemory() {
+    await fetch(`/api/memory/${emp.id}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ memory }),
+    })
+    setMemorySaved(true)
+    setTimeout(() => setMemorySaved(false), 2000)
+  }
 
   async function generateTasks(type) {
     setGenerating(true)
@@ -80,6 +98,8 @@ export default function EmployeePage() {
         body: JSON.stringify({
           messages: newMessages,
           systemPrompt: emp.systemPrompt,
+          employeeId: emp.id,
+          liveContext: liveContext || undefined,
         }),
       })
 
@@ -231,6 +251,33 @@ export default function EmployeePage() {
               {activeTab === 'afix' ? emp.afix : emp.atsell}
             </p>
           </div>
+
+          {/* Memory editor */}
+          <div className="mt-5 pt-5" style={{ borderTop: '1px solid #1A3350' }}>
+            <div className="text-xs font-semibold uppercase tracking-wider mb-2" style={{ color: '#5A7A99' }}>
+              Context &amp; Memory
+            </div>
+            <p className="text-xs mb-2" style={{ color: '#2A4560' }}>
+              Updates inject into every chat + task generation.
+            </p>
+            <textarea
+              value={memory}
+              onChange={e => setMemory(e.target.value)}
+              placeholder={`e.g. "Bishan launching next week, 12-home minimum. Toa Payoh at 8/10 homes."`}
+              rows={4}
+              className="w-full text-xs rounded-lg p-2.5 outline-none resize-none"
+              style={{ background: '#0B1829', border: '1px solid #1A3350', color: '#8899AA', caretColor: emp.accent }}
+              onFocus={e => { e.target.style.borderColor = emp.accent }}
+              onBlur={e => { e.target.style.borderColor = '#1A3350' }}
+            />
+            <button
+              onClick={saveMemory}
+              className="mt-2 w-full text-xs py-1.5 rounded-lg font-medium transition-all"
+              style={{ background: memorySaved ? '#5CB85C22' : `${emp.accent}22`, color: memorySaved ? '#5CB85C' : emp.accent, border: `1px solid ${memorySaved ? '#5CB85C44' : emp.accent + '44'}` }}
+            >
+              {memorySaved ? '✓ Saved' : 'Save context'}
+            </button>
+          </div>
         </div>
 
         {/* Tasks panel */}
@@ -368,6 +415,24 @@ export default function EmployeePage() {
             <div ref={messagesEndRef} />
           </div>
 
+          {/* Live context drop */}
+          {showContextBox && (
+            <div className="px-4 pt-3 flex-shrink-0" style={{ borderTop: '1px solid #1A3350' }}>
+              <div className="text-xs mb-1.5 flex items-center justify-between" style={{ color: '#5A7A99' }}>
+                <span>Live data for this session (GSC export, ad stats, competitor copy…)</span>
+                <button onClick={() => { setShowContextBox(false); setLiveContext('') }} style={{ color: '#2A4560' }}>✕</button>
+              </div>
+              <textarea
+                value={liveContext}
+                onChange={e => setLiveContext(e.target.value)}
+                placeholder="Paste any live data here — rankings, ad performance, competitor copy, etc."
+                rows={3}
+                className="w-full text-xs rounded-lg p-2.5 outline-none resize-none"
+                style={{ background: '#0B1829', border: `1px solid ${emp.accent}44`, color: '#8899AA', caretColor: emp.accent }}
+              />
+            </div>
+          )}
+
           {/* Input */}
           <div className="border-t p-4 flex-shrink-0" style={{ borderColor: '#1A3350' }}>
             <form onSubmit={sendMessage} className="flex gap-3">
@@ -398,9 +463,18 @@ export default function EmployeePage() {
                 Send
               </button>
             </form>
-            <p className="text-xs mt-2 text-center" style={{ color: '#2A4560' }}>
-              Powered by Claude claude-sonnet-4-6 · {emp.skills.slice(0, 3).join(', ')}
-            </p>
+            <div className="flex items-center justify-between mt-2">
+              <button
+                onClick={() => setShowContextBox(v => !v)}
+                className="text-xs transition-opacity hover:opacity-80"
+                style={{ color: showContextBox ? emp.accent : '#2A4560' }}
+              >
+                {showContextBox ? '▼ Hide data drop' : '+ Drop live data'}
+              </button>
+              <span className="text-xs" style={{ color: '#2A4560' }}>
+                {memory ? '● memory active' : ''}
+              </span>
+            </div>
           </div>
         </div>}
       </div>

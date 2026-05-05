@@ -162,6 +162,14 @@ export default function TaskBoard() {
                 >
                   {generating[`${emp.id}-weekly`] ? '...' : '+ Weekly'}
                 </button>
+                <button
+                  onClick={() => generateTasks(emp.id, 'systems')}
+                  disabled={generating[`${emp.id}-systems`]}
+                  className="text-xs py-1 px-2 rounded transition-opacity disabled:opacity-50"
+                  style={{ background: '#0B1829', color: emp.accent, border: `1px solid ${emp.accent}44` }}
+                >
+                  {generating[`${emp.id}-systems`] ? '...' : '⚙ Setup'}
+                </button>
               </div>
             </div>
           ))}
@@ -200,6 +208,7 @@ export default function TaskBoard() {
                           onMarkDone={() => updateTask(task.id, { status: 'done', done_at: Date.now() })}
                           isRunning={runningTask === task.id}
                           output={taskOutputs[task.id]}
+                          onRefresh={fetchTasks}
                         />
                       ))}
                     </div>
@@ -235,9 +244,24 @@ export default function TaskBoard() {
   )
 }
 
-function TaskCard({ task, colColor, onApprove, onReject, onDelete, onRun, onMarkDone, isRunning, output }) {
+function TaskCard({ task, colColor, onApprove, onReject, onDelete, onRun, onMarkDone, isRunning, output, onRefresh }) {
   const emp = employees[task.employee]
   const [showOutput, setShowOutput] = useState(false)
+  const [handoffTo, setHandoffTo] = useState('')
+  const [handing, setHanding] = useState(false)
+
+  async function doHandoff() {
+    if (!handoffTo) return
+    setHanding(true)
+    await fetch('/api/tasks/handoff', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fromTask: { ...task, output: output || task.output }, toEmployeeId: handoffTo }),
+    })
+    setHandoffTo('')
+    setHanding(false)
+    onRefresh?.()
+  }
 
   useEffect(() => {
     if (output) setShowOutput(true)
@@ -325,10 +349,34 @@ function TaskCard({ task, colColor, onApprove, onReject, onDelete, onRun, onMark
             Restore
           </button>
         )}
-        <button onClick={onDelete} className="text-xs ml-auto" style={{ color: '#2A4560' }}>
-          ✕
-        </button>
+        <button onClick={onDelete} className="text-xs ml-auto" style={{ color: '#2A4560' }}>✕</button>
       </div>
+
+      {/* Handoff — shown on done tasks with output */}
+      {task.status === 'done' && (task.output || output) && (
+        <div className="mt-3 pt-3 flex items-center gap-2" style={{ borderTop: '1px solid #1A3350' }}>
+          <span className="text-xs" style={{ color: '#5A7A99' }}>Hand off →</span>
+          <select
+            value={handoffTo}
+            onChange={e => setHandoffTo(e.target.value)}
+            className="flex-1 text-xs rounded px-2 py-1 outline-none"
+            style={{ background: '#0B1829', color: '#8899AA', border: '1px solid #1A3350' }}
+          >
+            <option value="">Pick employee...</option>
+            {Object.values(employees).filter(e => e.id !== task.employee).map(e => (
+              <option key={e.id} value={e.id}>{e.emoji} {e.name}</option>
+            ))}
+          </select>
+          <button
+            onClick={doHandoff}
+            disabled={!handoffTo || handing}
+            className="text-xs px-2.5 py-1 rounded disabled:opacity-40"
+            style={{ background: '#4A90D922', color: '#4A90D9', border: '1px solid #4A90D944' }}
+          >
+            {handing ? '...' : 'Send'}
+          </button>
+        </div>
+      )}
     </div>
   )
 }
