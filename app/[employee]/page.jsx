@@ -34,6 +34,165 @@ const REPO_KEY_FILES = {
   ],
 }
 
+function HiggsfieldPanel({ emp, onLoadToContext }) {
+  const [tab, setTab] = useState('image')
+  const [model, setModel] = useState('flux')
+  const [prompt, setPrompt] = useState('')
+  const [aspectRatio, setAspectRatio] = useState('1:1')
+  const [inputImageUrl, setInputImageUrl] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [result, setResult] = useState(null)
+  const [error, setError] = useState('')
+
+  async function generate() {
+    if (!prompt.trim()) return
+    setLoading(true)
+    setResult(null)
+    setError('')
+    try {
+      const res = await fetch('/api/higgsfield/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          type: tab,
+          model,
+          prompt: prompt.trim(),
+          aspectRatio,
+          inputImageUrl: inputImageUrl.trim() || undefined,
+        }),
+      })
+      const data = await res.json()
+      if (data.ok) setResult(data)
+      else setError(data.error || 'Generation failed')
+    } catch (e) {
+      setError('Request failed')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <div className="mt-5 pt-5" style={{ borderTop: '1px solid #1A3350' }}>
+      <div className="text-xs font-semibold uppercase tracking-wider mb-3" style={{ color: '#5A7A99' }}>
+        Higgsfield
+      </div>
+
+      {/* Image / Video tabs */}
+      <div className="flex gap-1 mb-3">
+        {['image', 'video'].map(t => (
+          <button key={t} onClick={() => { setTab(t); setResult(null); setError('') }}
+            className="flex-1 text-xs py-1 rounded capitalize transition-colors"
+            style={{
+              background: tab === t ? emp.accent : '#0B1829',
+              color: tab === t ? '#0B1829' : '#5A7A99',
+              border: `1px solid ${tab === t ? emp.accent : '#1A3350'}`,
+            }}>
+            {t}
+          </button>
+        ))}
+      </div>
+
+      {/* Model selector */}
+      {tab === 'image' && (
+        <div className="flex gap-1 mb-3">
+          {['flux', 'soul'].map(m => (
+            <button key={m} onClick={() => setModel(m)}
+              className="flex-1 text-xs py-1 rounded capitalize transition-colors"
+              style={{
+                background: model === m ? `${emp.accent}22` : '#0B1829',
+                color: model === m ? emp.accent : '#2A4560',
+                border: `1px solid ${model === m ? emp.accent + '44' : '#1A3350'}`,
+              }}>
+              {m}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* Aspect ratio (image only) */}
+      {tab === 'image' && (
+        <div className="flex gap-1 mb-3">
+          {['1:1', '9:16', '16:9', '4:5'].map(r => (
+            <button key={r} onClick={() => setAspectRatio(r)}
+              className="flex-1 text-xs py-0.5 rounded transition-colors"
+              style={{
+                background: aspectRatio === r ? `${emp.accent}22` : '#0B1829',
+                color: aspectRatio === r ? emp.accent : '#2A4560',
+                border: `1px solid ${aspectRatio === r ? emp.accent + '44' : '#1A3350'}`,
+                fontSize: '10px',
+              }}>
+              {r}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* Input image URL (video only) */}
+      {tab === 'video' && (
+        <input
+          type="text"
+          placeholder="Input image URL (optional)"
+          value={inputImageUrl}
+          onChange={e => setInputImageUrl(e.target.value)}
+          className="w-full text-xs px-2 py-1.5 rounded outline-none mb-2"
+          style={{ background: '#0B1829', border: '1px solid #1A3350', color: '#8899AA' }}
+        />
+      )}
+
+      {/* Prompt */}
+      <textarea
+        value={prompt}
+        onChange={e => setPrompt(e.target.value)}
+        placeholder={tab === 'image'
+          ? 'e.g. HDB aircon technician spraying water jet, dramatic lighting, 9:16'
+          : 'e.g. Slow cinematic push-in on progress bar filling up, gold glow'}
+        rows={3}
+        className="w-full text-xs rounded p-2 outline-none resize-none mb-2"
+        style={{ background: '#0B1829', border: `1px solid #1A3350`, color: '#8899AA', caretColor: emp.accent }}
+        onFocus={e => { e.target.style.borderColor = emp.accent + '88' }}
+        onBlur={e => { e.target.style.borderColor = '#1A3350' }}
+      />
+
+      <button
+        onClick={generate}
+        disabled={loading || !prompt.trim()}
+        className="w-full text-xs py-1.5 rounded font-medium disabled:opacity-40 transition-opacity"
+        style={{ background: emp.accent, color: '#0B1829' }}>
+        {loading ? 'Generating… (~30s)' : `Generate ${tab}`}
+      </button>
+
+      {error && (
+        <div className="mt-2 text-xs p-2 rounded" style={{ background: '#2A1020', color: '#E84393', border: '1px solid #4A1030' }}>
+          {error}
+        </div>
+      )}
+
+      {result && (
+        <div className="mt-3">
+          {result.type === 'image' ? (
+            <img src={result.url} alt="Generated" className="w-full rounded mb-2" style={{ border: '1px solid #1A3350' }} />
+          ) : (
+            <video src={result.url} controls className="w-full rounded mb-2" style={{ border: '1px solid #1A3350' }} />
+          )}
+          <div className="flex gap-1.5">
+            <button
+              onClick={() => onLoadToContext(`Generated ${result.type}: ${result.url}\nPrompt: ${prompt}`)}
+              className="flex-1 text-xs py-1.5 rounded font-medium"
+              style={{ background: `${emp.accent}22`, color: emp.accent, border: `1px solid ${emp.accent}44` }}>
+              → Use in chat
+            </button>
+            <a href={result.url} target="_blank" rel="noreferrer"
+              className="text-xs px-2.5 py-1.5 rounded"
+              style={{ background: '#1A3350', color: '#5A7A99' }}>
+              Open ↗
+            </a>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 function GitHubPanel({ emp, onLoadToContext }) {
   const [repo, setRepo] = useState(emp.githubRepos?.[0] || 'atsell')
   const [filePath, setFilePath] = useState('')
@@ -443,6 +602,17 @@ export default function EmployeePage() {
           {/* GitHub panel */}
           {emp.github && (
             <GitHubPanel
+              emp={emp}
+              onLoadToContext={content => {
+                setLiveContext(content)
+                setShowContextBox(true)
+              }}
+            />
+          )}
+
+          {/* Higgsfield panel */}
+          {emp.higgsfield && (
+            <HiggsfieldPanel
               emp={emp}
               onLoadToContext={content => {
                 setLiveContext(content)
