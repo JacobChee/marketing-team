@@ -6,6 +6,194 @@ import { useParams } from 'next/navigation'
 import { employees } from '../../lib/employees'
 import '../globals.css'
 
+const REPO_KEY_FILES = {
+  atsell: [
+    'app/page.jsx',
+    'app/layout.jsx',
+    'app/shopee-partner/page.jsx',
+    'app/lazada-partner/page.jsx',
+    'app/tiktok-shop-partner/page.jsx',
+    'app/blog/what-is-an-ecommerce-enabler/page.jsx',
+    'app/blog/shopee-vs-lazada/page.jsx',
+    'app/blog/shopee-listing-title-optimisation/page.jsx',
+    'app/blog/how-to-sell-on-lazada-singapore/page.jsx',
+    'app/calculator/page.jsx',
+    'app/seo-grader/page.jsx',
+    'public/robots.txt',
+    'public/sitemap.xml',
+  ],
+  afix: [
+    'aircon-servicing-toa-payoh/index.html',
+    'aircon-servicing-bishan/index.html',
+    'aircon-servicing-ang-mo-kio/index.html',
+    'aircon-servicing-kallang/index.html',
+    'aircon-servicing-serangoon/index.html',
+    'aircon-not-cold/index.html',
+    'aircon-leaking-water/index.html',
+    'robots.txt',
+  ],
+}
+
+function GitHubPanel({ emp, onLoadToContext }) {
+  const [repo, setRepo] = useState(emp.githubRepos?.[0] || 'atsell')
+  const [filePath, setFilePath] = useState('')
+  const [fileContent, setFileContent] = useState(null)
+  const [fileSha, setFileSha] = useState(null)
+  const [loading, setLoading] = useState(false)
+  const [commitMsg, setCommitMsg] = useState('')
+  const [newContent, setNewContent] = useState('')
+  const [prUrl, setPrUrl] = useState('')
+  const [committing, setCommitting] = useState(false)
+  const [showWrite, setShowWrite] = useState(false)
+
+  async function loadFile(path) {
+    setLoading(true)
+    setFileContent(null)
+    setPrUrl('')
+    setShowWrite(false)
+    try {
+      const res = await fetch('/api/github/read', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ repo, path }),
+      })
+      const data = await res.json()
+      if (data.type === 'file') {
+        setFileContent(data.content)
+        setFileSha(data.sha)
+        setFilePath(path)
+        setNewContent(data.content)
+        setCommitMsg(`Update ${path}`)
+      }
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  async function commitPR() {
+    setCommitting(true)
+    setPrUrl('')
+    try {
+      const res = await fetch('/api/github/write', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ repo, path: filePath, content: newContent, message: commitMsg, currentSha: fileSha }),
+      })
+      const data = await res.json()
+      if (data.pr_url) setPrUrl(data.pr_url)
+    } finally {
+      setCommitting(false)
+    }
+  }
+
+  return (
+    <div className="mt-5 pt-5" style={{ borderTop: '1px solid #1A3350' }}>
+      <div className="text-xs font-semibold uppercase tracking-wider mb-3" style={{ color: '#5A7A99' }}>
+        GitHub
+      </div>
+
+      {/* Repo selector */}
+      <div className="flex gap-1 mb-3">
+        {emp.githubRepos.map(r => (
+          <button key={r} onClick={() => { setRepo(r); setFileContent(null); setFilePath('') }}
+            className="flex-1 text-xs py-1 rounded transition-colors"
+            style={{ background: repo === r ? emp.accent : '#0B1829', color: repo === r ? '#0B1829' : '#5A7A99', border: `1px solid ${repo === r ? emp.accent : '#1A3350'}` }}>
+            {r}
+          </button>
+        ))}
+      </div>
+
+      {/* Key files */}
+      <div className="mb-3">
+        <div className="text-xs mb-1.5" style={{ color: '#2A4560' }}>Key files</div>
+        <div className="space-y-1 max-h-36 overflow-y-auto">
+          {(REPO_KEY_FILES[repo] || []).map(f => (
+            <button key={f} onClick={() => loadFile(f)}
+              className="w-full text-left text-xs px-2 py-1 rounded truncate transition-colors hover:opacity-80"
+              style={{ background: filePath === f ? `${emp.accent}22` : '#0B1829', color: filePath === f ? emp.accent : '#5A7A99', border: `1px solid ${filePath === f ? emp.accent + '44' : '#1A3350'}` }}>
+              {f}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Custom path */}
+      <div className="flex gap-1 mb-3">
+        <input
+          type="text"
+          placeholder="or type a path..."
+          onKeyDown={e => e.key === 'Enter' && loadFile(e.target.value)}
+          className="flex-1 text-xs px-2 py-1 rounded outline-none"
+          style={{ background: '#0B1829', border: '1px solid #1A3350', color: '#8899AA' }}
+        />
+        <button onClick={e => loadFile(e.target.previousSibling.value)}
+          className="text-xs px-2 py-1 rounded" style={{ background: '#1A3350', color: '#5A7A99' }}>
+          Load
+        </button>
+      </div>
+
+      {loading && <div className="text-xs" style={{ color: '#5A7A99' }}>Loading...</div>}
+
+      {fileContent && (
+        <div>
+          <div className="text-xs mb-1.5 flex items-center justify-between" style={{ color: '#5A7A99' }}>
+            <span className="truncate" style={{ maxWidth: '70%' }}>{filePath}</span>
+            <span>{Math.round(fileContent.length / 1024)}kb</span>
+          </div>
+          <div className="flex gap-1.5 mb-2">
+            <button
+              onClick={() => onLoadToContext(`File: ${repo}/${filePath}\n\n${fileContent}`)}
+              className="flex-1 text-xs py-1.5 rounded font-medium"
+              style={{ background: `${emp.accent}22`, color: emp.accent, border: `1px solid ${emp.accent}44` }}>
+              → Load to chat
+            </button>
+            <button
+              onClick={() => setShowWrite(v => !v)}
+              className="text-xs px-2.5 py-1.5 rounded"
+              style={{ background: '#1A3350', color: '#5A7A99' }}>
+              Edit & PR
+            </button>
+          </div>
+
+          {showWrite && (
+            <div>
+              <textarea
+                value={newContent}
+                onChange={e => setNewContent(e.target.value)}
+                rows={6}
+                className="w-full text-xs rounded p-2 outline-none resize-none mb-2 font-mono"
+                style={{ background: '#0B1829', border: '1px solid #1A3350', color: '#8899AA' }}
+              />
+              <input
+                type="text"
+                value={commitMsg}
+                onChange={e => setCommitMsg(e.target.value)}
+                placeholder="Commit message"
+                className="w-full text-xs px-2 py-1.5 rounded outline-none mb-2"
+                style={{ background: '#0B1829', border: '1px solid #1A3350', color: '#8899AA' }}
+              />
+              <button
+                onClick={commitPR}
+                disabled={committing}
+                className="w-full text-xs py-1.5 rounded font-medium disabled:opacity-50"
+                style={{ background: '#4A90D922', color: '#4A90D9', border: '1px solid #4A90D944' }}>
+                {committing ? 'Creating PR...' : 'Create PR →'}
+              </button>
+              {prUrl && (
+                <a href={prUrl} target="_blank" rel="noreferrer"
+                  className="block text-xs mt-2 text-center underline"
+                  style={{ color: '#5CB85C' }}>
+                  ✓ PR created — review on GitHub
+                </a>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
 export default function EmployeePage() {
   const params = useParams()
   const emp = employees[params.employee]
@@ -251,6 +439,17 @@ export default function EmployeePage() {
               {activeTab === 'afix' ? emp.afix : emp.atsell}
             </p>
           </div>
+
+          {/* GitHub panel */}
+          {emp.github && (
+            <GitHubPanel
+              emp={emp}
+              onLoadToContext={content => {
+                setLiveContext(content)
+                setShowContextBox(true)
+              }}
+            />
+          )}
 
           {/* Memory editor */}
           <div className="mt-5 pt-5" style={{ borderTop: '1px solid #1A3350' }}>
