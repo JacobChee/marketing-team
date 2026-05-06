@@ -95,7 +95,7 @@ export default function TaskBoard() {
 
     // If this task targets a specific file, instruct Claude to output ONLY the file content
     const fileInstruction = task.filePath
-      ? `\n\nIMPORTANT: Your output will be committed directly to \`${task.filePath}\` in the ${task.repo} repo. Output ONLY the complete file content — no preamble, no explanation, no markdown fences. Start immediately with the file content.`
+      ? `\n\nIMPORTANT: Your output will be committed directly to \`${task.filePath}\` in the ${task.repo} repo. Output ONLY the complete, valid file — no preamble, no explanation, no markdown fences. Start immediately with the file content. If the file is JSX/TSX: escape all ampersands in JSX text as {' & '} or &amp; (never bare &), ensure the file is complete and not truncated.`
       : `\n\nProduce the complete deliverable now. No preamble.`
 
     const prompt = `Execute this task and produce the actual output:\n\n**Task:** ${task.title}\n**Brief:** ${task.description}\n**Brand:** ${BRAND_LABEL[task.brand]}${context}${fileInstruction}`
