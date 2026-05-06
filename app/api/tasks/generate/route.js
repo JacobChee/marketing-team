@@ -22,6 +22,8 @@ const FILE_PATHS = {
       'app/shopee-partner/page.jsx',
       'app/lazada-partner/page.jsx',
       'app/tiktok-shop-partner/page.jsx',
+      'app/markets/singapore/page.jsx',
+      'app/markets/malaysia/page.jsx',
       'public/robots.txt',
       'public/sitemap.xml',
     ],

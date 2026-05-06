@@ -351,12 +351,17 @@ function TaskCard({ task, colColor, onApprove, onReject, onDelete, onRun, onMark
   const [pushing, setPushing]       = useState(false)
   const [prUrl, setPrUrl]           = useState(task.prUrl || '')
   const [prError, setPrError]       = useState('')
+  const [editingPath, setEditingPath] = useState(false)
+  const [customPath, setCustomPath]   = useState(task.filePath || '')
+  const [customRepo, setCustomRepo]   = useState(task.repo || '')
 
   useEffect(() => { if (output) setShowOutput(true) }, [output])
 
   async function pushToGitHub() {
     const content = output || task.output
-    if (!content || !task.filePath || !task.repo) return
+    const filePath = customPath || task.filePath
+    const repo = customRepo || task.repo
+    if (!content || !filePath || !repo) return
     setPushing(true); setPrError('')
     try {
       // Read current SHA (file may not exist yet)
@@ -375,8 +380,8 @@ function TaskCard({ task, colColor, onApprove, onReject, onDelete, onRun, onMark
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          repo: task.repo,
-          path: task.filePath,
+          repo: repo,
+          path: filePath,
           content,
           message: `[${task.employee}] ${task.title}`,
           currentSha,
@@ -477,10 +482,34 @@ function TaskCard({ task, colColor, onApprove, onReject, onDelete, onRun, onMark
               )}
             </div>
             {prError && <div className="text-xs mb-1" style={{ color: '#E84393' }}>{prError}</div>}
-            {/* File target indicator */}
-            {task.filePath && (
-              <div className="text-xs mb-1.5 font-mono" style={{ color: '#2A4560' }}>
-                {task.repo}/{task.filePath}
+            {/* File target — editable before push */}
+            {(task.filePath || task.repo) && !prUrl && (
+              <div className="mb-1.5">
+                {editingPath ? (
+                  <div className="flex gap-1">
+                    <select value={customRepo} onChange={e => setCustomRepo(e.target.value)}
+                      className="text-xs px-1.5 py-1 rounded outline-none"
+                      style={{ background: '#0B1829', color: '#8899AA', border: '1px solid #1A3350', width: '70px' }}>
+                      <option value="atsell">atsell</option>
+                      <option value="afix">afix</option>
+                    </select>
+                    <input
+                      value={customPath}
+                      onChange={e => setCustomPath(e.target.value)}
+                      className="flex-1 text-xs px-1.5 py-1 rounded outline-none font-mono"
+                      style={{ background: '#0B1829', color: '#8899AA', border: '1px solid #4A90D9', fontSize: '10px' }}
+                    />
+                    <button onClick={() => setEditingPath(false)} className="text-xs px-1.5 py-1 rounded"
+                      style={{ background: '#4A90D922', color: '#4A90D9' }}>✓</button>
+                  </div>
+                ) : (
+                  <button onClick={() => setEditingPath(true)}
+                    className="flex items-center gap-1 text-xs font-mono hover:opacity-80"
+                    style={{ color: '#2A4560' }}>
+                    <span>{customRepo || task.repo}/{customPath || task.filePath}</span>
+                    <span style={{ color: '#1A3350' }}>✎</span>
+                  </button>
+                )}
               </div>
             )}
             {showOutput && (
