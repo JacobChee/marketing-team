@@ -1,4 +1,5 @@
-export const maxDuration = 60
+// Submit a Higgsfield generation job and return immediately with jobId.
+// The frontend polls /api/higgsfield/status for completion.
 
 const BASE_URL = 'https://api.higgsfield.ai'
 
@@ -18,23 +19,7 @@ async function higgsfieldFetch(path, options = {}) {
   return { ok: res.ok, status: res.status, data }
 }
 
-async function pollUntilDone(id, maxWaitMs = 55000) {
-  const start = Date.now()
-  while (Date.now() - start < maxWaitMs) {
-    await new Promise(r => setTimeout(r, 3000))
-    const { ok, data } = await higgsfieldFetch(`/v1/generations/${id}`)
-    if (!ok) continue
-    const status = data.status
-    if (status === 'completed' || status === 'succeeded') return { success: true, data }
-    if (status === 'failed' || status === 'error') return { success: false, error: data.error || 'Generation failed' }
-    if (status === 'nsfw') return { success: false, error: 'Content flagged as NSFW' }
-    // queued / processing / in_progress → keep polling
-  }
-  return { success: false, error: 'Timed out after 55s' }
-}
-
 function extractUrl(data) {
-  // Try common response shapes
   return (
     data?.output?.[0] ||
     data?.output ||
@@ -65,7 +50,6 @@ export async function POST(req) {
   let requestBody
 
   if (type === 'image') {
-    // Derive width/height from aspect ratio
     const dims = {
       '1:1':  { width: 1024, height: 1024 },
       '9:16': { width: 768,  height: 1360 },
@@ -74,24 +58,22 @@ export async function POST(req) {
     }[aspectRatio || '1:1'] || { width: 1024, height: 1024 }
 
     requestBody = {
-      task: 'text-to-image',
       model: model === 'soul' ? 'soul' : 'flux',
       prompt: prompt.trim(),
       ...dims,
-      steps: 30,
+      num_inference_steps: 30,
     }
   } else if (type === 'video') {
     requestBody = {
-      task: 'image-to-video',
-      model: 'default-video-model',
+      model: 'dop-turbo',
       prompt: prompt.trim(),
-      ...(inputImageUrl?.trim() ? { input_image: inputImageUrl.trim() } : {}),
+      ...(inputImageUrl?.trim() ? { image_url: inputImageUrl.trim() } : {}),
     }
   } else {
     return Response.json({ error: 'type must be image or video' }, { status: 400 })
   }
 
-  // Submit job
+  // Submit job — return immediately, client polls for status
   const submit = await higgsfieldFetch('/v1/generations', {
     method: 'POST',
     body: JSON.stringify(requestBody),
@@ -99,30 +81,20 @@ export async function POST(req) {
 
   if (!submit.ok) {
     const msg = submit.data?.message || submit.data?.error || submit.data?.detail || `HTTP ${submit.status}`
-    return Response.json({ error: `Higgsfield: ${msg}` }, { status: 502 })
+    return Response.json({ error: `Higgsfield: ${msg}`, debug: submit.data }, { status: 502 })
   }
 
-  // Check if result came back immediately
+  // If result came back immediately (synchronous generation)
   const immediateUrl = extractUrl(submit.data)
   if (immediateUrl) {
-    return Response.json({ ok: true, url: immediateUrl, type })
+    return Response.json({ ok: true, done: true, url: immediateUrl, type })
   }
 
-  // Otherwise poll
-  const jobId = submit.data?.id || submit.data?.job_id || submit.data?.request_id
+  // Extract job ID for async polling
+  const jobId = submit.data?.id || submit.data?.job_id || submit.data?.request_id || submit.data?.generation_id
   if (!jobId) {
     return Response.json({ error: 'No job ID returned', debug: submit.data }, { status: 502 })
   }
 
-  const result = await pollUntilDone(jobId)
-  if (!result.success) {
-    return Response.json({ error: result.error }, { status: 500 })
-  }
-
-  const url = extractUrl(result.data)
-  if (!url) {
-    return Response.json({ error: 'No output URL in response', debug: result.data }, { status: 500 })
-  }
-
-  return Response.json({ ok: true, url, type })
+  return Response.json({ ok: true, done: false, jobId, type })
 }

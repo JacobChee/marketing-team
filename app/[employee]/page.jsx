@@ -46,6 +46,7 @@ function GscPanel({ emp, onLoadToContext }) {
   const [status, setStatus]       = useState(null) // { ok, message } | null
   const [sitemaps, setSitemaps]   = useState(null)
   const [inspectResult, setInspectResult] = useState(null)
+  const [topPages, setTopPages]   = useState(null)
   const [notConfigured, setNotConfigured] = useState(false)
 
   const cfg = GSC_SITES[site]
@@ -86,6 +87,17 @@ function GscPanel({ emp, onLoadToContext }) {
     }
   }
 
+  async function fetchTopPages() {
+    const data = await gscPost({ action: 'search-analytics' })
+    if (data?.rows) {
+      setTopPages(data.rows)
+      const summary = data.rows.map(r =>
+        `${r.keys?.[0] || '?'} — ${r.clicks} clicks, ${r.impressions} impressions, pos ${r.position?.toFixed(1)}`
+      ).join('\n')
+      onLoadToContext(`GSC Top Pages (28d) — ${GSC_SITES[site].label}:\n${summary}`)
+    }
+  }
+
   return (
     <div className="mt-5 pt-5" style={{ borderTop: '1px solid #1A3350' }}>
       <div className="text-xs font-semibold uppercase tracking-wider mb-3" style={{ color: '#5A7A99' }}>
@@ -105,7 +117,7 @@ function GscPanel({ emp, onLoadToContext }) {
           {/* Site selector */}
           <div className="flex gap-1 mb-3">
             {Object.entries(GSC_SITES).map(([key, s]) => (
-              <button key={key} onClick={() => { setSite(key); setStatus(null); setSitemaps(null); setInspectResult(null) }}
+              <button key={key} onClick={() => { setSite(key); setStatus(null); setSitemaps(null); setInspectResult(null); setTopPages(null) }}
                 className="flex-1 text-xs py-1 rounded transition-colors"
                 style={{
                   background: site === key ? emp.accent : '#0B1829',
@@ -152,6 +164,34 @@ function GscPanel({ emp, onLoadToContext }) {
                   </span>
                 </div>
               ))}
+            </div>
+          )}
+
+          {/* Top pages */}
+          <div className="mb-3">
+            <button onClick={fetchTopPages} disabled={loading}
+              className="w-full text-xs py-1.5 rounded disabled:opacity-50 transition-opacity"
+              style={{ background: '#0B1829', color: '#5A7A99', border: '1px solid #1A3350' }}>
+              {loading ? '...' : '📊 Top pages (28d)'}
+            </button>
+          </div>
+
+          {topPages && (
+            <div className="mb-3 space-y-1 max-h-40 overflow-y-auto">
+              {topPages.length === 0 && <div className="text-xs" style={{ color: '#2A4560' }}>No data yet</div>}
+              {topPages.map((row, i) => {
+                const page = row.keys?.[0]?.replace(/^https?:\/\/[^/]+/, '') || row.keys?.[0] || '/'
+                return (
+                  <div key={i} className="text-xs px-2 py-1.5 rounded" style={{ background: '#0B1829', border: '1px solid #1A3350' }}>
+                    <div className="truncate mb-0.5" style={{ color: '#8899AA' }}>{page}</div>
+                    <div className="flex gap-3">
+                      <span style={{ color: '#5CB85C' }}>{row.clicks} clicks</span>
+                      <span style={{ color: '#3A5A7A' }}>{row.impressions?.toLocaleString()} impr</span>
+                      <span style={{ color: '#C9A026' }}>pos {row.position?.toFixed(1)}</span>
+                    </div>
+                  </div>
+                )
+              })}
             </div>
           )}
 
@@ -211,6 +251,7 @@ function HiggsfieldPanel({ emp, onLoadToContext }) {
   const [aspectRatio, setAspectRatio] = useState('1:1')
   const [inputImageUrl, setInputImageUrl] = useState('')
   const [loading, setLoading] = useState(false)
+  const [pollStatus, setPollStatus] = useState('')
   const [result, setResult] = useState(null)
   const [error, setError] = useState('')
 
@@ -219,25 +260,69 @@ function HiggsfieldPanel({ emp, onLoadToContext }) {
     setLoading(true)
     setResult(null)
     setError('')
+    setPollStatus('Submitting job...')
+
     try {
+      // Step 1: Submit the job — returns immediately with jobId
       const res = await fetch('/api/higgsfield/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          type: tab,
-          model,
-          prompt: prompt.trim(),
-          aspectRatio,
-          inputImageUrl: inputImageUrl.trim() || undefined,
+          type: tab, model, prompt: prompt.trim(),
+          aspectRatio, inputImageUrl: inputImageUrl.trim() || undefined,
         }),
       })
-      const data = await res.json()
-      if (data.ok) setResult(data)
-      else setError(data.error || 'Generation failed')
+      const submitData = await res.json()
+
+      if (!submitData.ok) {
+        setError(submitData.error || 'Submission failed')
+        if (submitData.debug) console.error('[Higgsfield debug]', submitData.debug)
+        return
+      }
+
+      // If already done (synchronous result)
+      if (submitData.done && submitData.url) {
+        setResult(submitData)
+        return
+      }
+
+      // Step 2: Poll for completion
+      const { jobId, type } = submitData
+      setPollStatus('Generating...')
+      let attempts = 0
+      const maxAttempts = 40 // 40 × 3s = 120s max
+
+      while (attempts < maxAttempts) {
+        await new Promise(r => setTimeout(r, 3000))
+        attempts++
+        setPollStatus(`Generating... (${attempts * 3}s)`)
+
+        try {
+          const pollRes = await fetch('/api/higgsfield/status', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ jobId }),
+          })
+          const pollData = await pollRes.json()
+
+          if (pollData.done) {
+            if (pollData.url) {
+              setResult({ ok: true, url: pollData.url, type })
+            } else {
+              setError(pollData.error || 'Generation failed')
+            }
+            return
+          }
+          // still processing — keep polling
+        } catch {}
+      }
+      setError('Timed out after 2 minutes')
     } catch (e) {
-      setError('Request failed')
+      setError('Network error — check console')
+      console.error('[Higgsfield]', e)
     } finally {
       setLoading(false)
+      setPollStatus('')
     }
   }
 
@@ -328,7 +413,7 @@ function HiggsfieldPanel({ emp, onLoadToContext }) {
         disabled={loading || !prompt.trim()}
         className="w-full text-xs py-1.5 rounded font-medium disabled:opacity-40 transition-opacity"
         style={{ background: emp.accent, color: '#0B1829' }}>
-        {loading ? 'Generating… (~30s)' : `Generate ${tab}`}
+        {loading ? (pollStatus || 'Working...') : `Generate ${tab}`}
       </button>
 
       {error && (
@@ -359,6 +444,72 @@ function HiggsfieldPanel({ emp, onLoadToContext }) {
           </div>
         </div>
       )}
+    </div>
+  )
+}
+
+function MetaAdsPanel({ emp, onLoadToContext }) {
+  const [csv, setCsv] = useState('')
+  const [loaded, setLoaded] = useState(false)
+
+  const TEMPLATE = `Campaign,Ad Set,Impressions,Clicks,CTR,CPM,Spend,WhatsApp Clicks,Cost/WA Click,Results
+Toa Payoh - Messages,FOMO Hook,12400,380,3.06%,S$8.20,S$102,28,S$3.64,28 conversations
+Toa Payoh - Messages,Savings Hook,9800,290,2.96%,S$8.50,S$83,19,S$4.37,19 conversations
+Bishan - Messages,FOMO Hook,0,0,-,-,S$0,-,-,0
+Kallang - Messages,FOMO Hook,0,0,-,-,S$0,-,-,0`
+
+  function loadToContext() {
+    if (!csv.trim()) return
+    onLoadToContext(`Meta Ads Performance Data:\n\n${csv.trim()}`)
+    setLoaded(true)
+    setTimeout(() => setLoaded(false), 2000)
+  }
+
+  return (
+    <div className="mt-5 pt-5" style={{ borderTop: '1px solid #1A3350' }}>
+      <div className="text-xs font-semibold uppercase tracking-wider mb-1" style={{ color: '#5A7A99' }}>
+        Meta Ads Data
+      </div>
+      <p className="text-xs mb-3" style={{ color: '#2A4560' }}>
+        Export from Meta Ads Manager → paste CSV below → load to Rex's context.
+      </p>
+
+      <textarea
+        value={csv}
+        onChange={e => setCsv(e.target.value)}
+        placeholder={TEMPLATE}
+        rows={5}
+        className="w-full text-xs rounded p-2 outline-none resize-none font-mono mb-2"
+        style={{ background: '#0B1829', border: '1px solid #1A3350', color: '#8899AA', caretColor: emp.accent, fontSize: '10px' }}
+        onFocus={e => { e.target.style.borderColor = emp.accent + '88' }}
+        onBlur={e => { e.target.style.borderColor = '#1A3350' }}
+      />
+
+      <div className="flex gap-1.5">
+        <button
+          onClick={loadToContext}
+          disabled={!csv.trim()}
+          className="flex-1 text-xs py-1.5 rounded font-medium disabled:opacity-40 transition-all"
+          style={{
+            background: loaded ? '#5CB85C22' : `${emp.accent}22`,
+            color: loaded ? '#5CB85C' : emp.accent,
+            border: `1px solid ${loaded ? '#5CB85C44' : emp.accent + '44'}`,
+          }}>
+          {loaded ? '✓ Loaded to chat' : '→ Load to Rex'}
+        </button>
+        <button
+          onClick={() => setCsv(TEMPLATE)}
+          className="text-xs px-2.5 py-1.5 rounded"
+          style={{ background: '#0B1829', color: '#2A4560', border: '1px solid #1A3350' }}>
+          Template
+        </button>
+      </div>
+
+      <div className="mt-3 text-xs space-y-1" style={{ color: '#2A4560' }}>
+        <div>Export path: Meta Ads Manager → Columns → Export → CSV</div>
+        <div>Include: Campaign, Ad Set, Impressions, Clicks, CTR, Spend</div>
+        <div>Date range: Last 7 days or custom</div>
+      </div>
     </div>
   )
 }
@@ -787,6 +938,17 @@ export default function EmployeePage() {
           {/* GSC panel */}
           {emp.gsc && (
             <GscPanel
+              emp={emp}
+              onLoadToContext={content => {
+                setLiveContext(content)
+                setShowContextBox(true)
+              }}
+            />
+          )}
+
+          {/* Meta Ads panel (Rex) */}
+          {emp.metaAds && (
+            <MetaAdsPanel
               emp={emp}
               onLoadToContext={content => {
                 setLiveContext(content)
